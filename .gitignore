@@ -1,0 +1,41 @@
+# Node / JS
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# WASM build artifacts
+*.wasm
+*.wat
+target/
+
+# Model weights, datasets, rendered assets
+*.pt
+*.onnx
+*.engine
+*.ckpt
+*.h5
+data/
+datasets/
+assets/renders/
+*.mp4
+*.mov
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.key
