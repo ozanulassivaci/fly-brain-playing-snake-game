@@ -261,6 +261,24 @@ soma positions for the Phase 0 candidate subset
 from already-downloaded data — see THIRD_PARTY_NOTICES.md) instead of a
 synthetic 2D layout, still only decoratively pulsing on game events.
 
+Follow-up fixes after first-look feedback on this round: the fly was
+lying on its side and later facing parallel to the screen rather than
+into it — root cause was that once the Z-up-to-Y-up correction fixes
+one Euler axis at -90°, Three.js's default 'XYZ' Euler order makes the
+remaining "heading" axis rotate in the world X-Y plane instead of
+turning left/right, so no single-Euler value could ever face the
+screen. Fixed by composing two separate quaternions (stand-upright,
+then heading around world Y) instead of one combined Euler — verified
+with a temporary `ArrowHelper` on the head axis read from a straight
+top-down camera, since an oblique view had given false confidence
+twice already. Once facing the screen, the fly's long axis pointed in
+Z instead of X, so it clipped into the control panel until
+repositioned; the reach also had to move from the front-left to the
+front-right leg (now the side nearer the joystick) and blend from the
+leg's pose at trigger time rather than the live gait angle, since the
+0.7 Hz walking cycle was otherwise fighting the reach and making it
+look jittery.
+
 **Phase 2 — Real connectome visualization.** Python/CUDA backend
 simulates the real MaleCNS functional subset (LIF), streams spikes over
 WebSocket. Brain panel renders real activity on the full-connectome
