@@ -151,7 +151,7 @@ neurons total — matches the project's stated 166,700 closely):
 | Optic lobe (all visual superclasses) | `superclass` in `{ol_intrinsic, ol_sensory, visual_projection, visual_centrifugal}` | 103,268 |
 | Motion/looming pathway only | `type` matches `T4`, `T5`, `LC*`, `LPLC*`, `LT*` | 18,457 |
 | — of which core motion detectors | `type` matches `T4`, `T5` | 13,585 |
-| Central complex | `type` matches known CX type prefixes (EPG, PEN, PFN, hDelta, FB*, EB, PB, NO, ...) | 2,643 |
+| Central complex (ROI-based, cross-checked) | `roiInfo` has synweight >= 5 in EB, FB, PB(any glomerulus), or NO | 3,137 |
 | Descending neurons | `superclass == 'descending_neuron'` | 1,314 |
 
 The full optic lobe (103k) is ~2x the literature-based estimate and is
@@ -161,28 +161,28 @@ LPLC/LT) is a much smaller, biologically meaningful proxy for what a
 Snake-playing fly actually needs (direction of movement, collision/
 approach cues) rather than full visual acuity.
 
-**Candidate functional subset: motion pathway + CX + DN = 22,414
+**Candidate functional subset: motion pathway + CX + DN = 22,893
 neurons** (~14% of the full connectome). Its internal connectivity:
-1,097,787 edges fully inside the subset, average out-degree ~49.
+1,183,489 edges fully inside the subset, average out-degree ~51.7.
 
 **Important caveat found while checking this candidate subset**: it is
 not a self-contained circuit. Checking what fraction of each group's
-inputs come from within the 22,414-neuron subset itself:
+inputs come from within the 22,893-neuron subset itself:
 
 | Group | Inputs from within subset |
 | --- | --- |
-| Motion pathway (T4/T5/LC/LPLC/LT) | 25.7% |
-| Central complex | 76.5% |
-| Descending neurons | 16.1% |
+| Motion pathway (T4/T5/LC/LPLC/LT) | 25.9% |
+| Central complex | 72.5% |
+| Descending neurons | 17.0% |
 
-The motion pathway's missing 74% of input comes from earlier optic lobe
-layers (Mi1, Tm1-9, etc.) that were deliberately excluded — this is
-expected and acceptable, since Phase 3's plan already calls for
+The motion pathway's missing ~74% of input comes from earlier optic
+lobe layers (Mi1, Tm1-9, etc.) that were deliberately excluded — this
+is expected and acceptable, since Phase 3's plan already calls for
 injecting a synthetic "motion energy" signal derived from the Snake
 screen directly into this layer rather than simulating the full deep
-visual pathway. Central complex is well-preserved (76.5% internal) —
+visual pathway. Central complex is well-preserved (72.5% internal) —
 its real ring-attractor/heading-integration dynamics are worth actually
-simulating. Descending neurons are the weak point: only 16.1% of their
+simulating. Descending neurons are the weak point: only 17.0% of their
 real input is captured, so simulating realistic DN spiking dynamics
 from this subset alone would be misleading. Decision: treat CX output →
 DN as a simplified categorical mapping (CX heading/turn signal → a
@@ -191,13 +191,30 @@ rather than expecting biologically faithful DN spike trains. This is
 consistent with the project's own framing of the reward/steering signal
 as behavioral shaping, not real learning.
 
-Remaining Phase 0 open question: central complex was selected here by
-matching known type-name prefixes (EPG, PEN, PFN, hDelta, FB*, ...)
-against the `type` column, not by the ROI (`roiInfo`) field, since
-`roiInfo` isn't present in the annotations table we downloaded — it
-likely lives in a separate table or requires a neuPrint query. Worth a
-cross-check against ROI-based filtering before finalizing the subset,
-in case the name-prefix heuristic missed or over-included types.
+**ROI-based cross-check of the central complex selection (done).**
+Central complex was initially selected by type-name prefix matching
+(EPG, PEN, PEG, PFN, PFL, PFR, PFG, hDelta, vDelta, Delta7, ExR, FB,
+EB, PB, NO, LNO, SpsP, IbSpsP, FS, FC, FR against the `type` column):
+2,643 neurons. To verify this against the dataset's actual ROI
+structure, downloaded the full `Neuprint_Neurons.feather` (4.6 GB,
+from `v1.0/database/neuprint-inputs/` — the neuPrint Neo4j import
+table, distinct from the smaller `flat-connectome` annotations file
+and the only place `roiInfo` actually lives) and filtered by `roiInfo`
+synapse weight (synweight >= 5) in EB, FB, any PB glomerulus, or NO —
+the confirmed FlyEM ROI names for the central complex, verified
+directly from real roiInfo keys in this dataset. Result: 3,137
+neurons, 2,631 of which overlap with the type-name set (99.5%
+agreement on the type-name side). Two real corrections came out of
+this:
+- 506 neurons the type-name heuristic missed, almost all `ER*` types
+  (ellipsoid body ring neurons) plus `EL`/`SA*` — a real class of
+  central-complex ring-attractor neurons the original prefix list
+  simply didn't include.
+- 12 false positives in the type-name set (`Nod1`-`Nod5`), which
+  matched the `NO` prefix by name coincidence but are actually
+  `visual_projection` neurons unrelated to the noduli.
+The central complex count and all totals above already use the
+corrected, ROI-based figure (3,137).
 
 ## Phase breakdown
 
@@ -230,10 +247,7 @@ Phase 1 scripted animation here.
 
 ## Open risks / unresolved questions
 
-- Central complex subset was picked by type-name prefix matching, not
-  ROI filtering (`roiInfo` not present in the downloaded annotations
-  table) — cross-check before finalizing.
-- Descending neurons only receive 16.1% of their real input from within
+- Descending neurons only receive 17.0% of their real input from within
   the candidate subset — decided to treat CX → DN as a simplified
   categorical mapping rather than simulating realistic DN spiking (see
   empirical findings above). Revisit if this looks too artificial once
