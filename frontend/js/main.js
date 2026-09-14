@@ -61,20 +61,26 @@ async function main() {
   const size = box.getSize(new THREE.Vector3());
   const scale = TARGET_FLY_HEIGHT / Math.max(size.x, size.y, size.z, 1e-6);
   const center = box.getCenter(new THREE.Vector3());
-  // MuJoCo's model is Z-up; Three.js is Y-up. rotationX corrects for that
-  // (without it the fly renders lying on its side, on top of a Y-heading
-  // rotation that just spins it while still lying down — confirmed by
-  // comparing screenshots across both axes). rotationY then sets which way
-  // it faces once actually standing upright.
-  const rotationX = -Math.PI / 2;
-  const rotationY = 0;
-  const euler = new THREE.Euler(rotationX, rotationY, 0);
+  // MuJoCo's model is Z-up; Three.js is Y-up. standQuat corrects for that
+  // (without it the fly renders lying on its side). headingQuat then turns
+  // the now-upright fly around the world Y (vertical) axis to face a given
+  // direction. These must be composed as separate quaternions in this
+  // order — combining them as a single Euler(x, y, 0) doesn't work: once x
+  // is fixed at -90°, Three.js's default 'XYZ' Euler order makes the y
+  // component rotate in the world X-Y plane (tipping the fly up/down)
+  // instead of turning it left/right, so it can never actually point
+  // toward or away from the screen. Confirmed with a temporary
+  // ArrowHelper on the head axis before switching to this approach.
+  const standQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+  const headingAngle = Math.PI / 2; // faces the screen head-on, verified with a temporary ArrowHelper
+  const headingQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), headingAngle);
+  const finalQuat = headingQuat.clone().multiply(standQuat);
   flyWrapper.scale.setScalar(scale);
-  flyWrapper.rotation.copy(euler);
+  flyWrapper.quaternion.copy(finalQuat);
   // position is set so the *rotated, scaled* bounding-box center (not the
   // raw local center) lands at the target world point next to the joystick.
   const targetPosition = new THREE.Vector3(-0.24, 0.82, 0.56);
-  const centerOffset = center.clone().multiplyScalar(scale).applyEuler(euler);
+  const centerOffset = center.clone().multiplyScalar(scale).applyQuaternion(finalQuat);
   flyWrapper.position.copy(targetPosition).sub(centerOffset);
 
   const brainCanvas = document.getElementById('brain-canvas');
