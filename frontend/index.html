@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fly Arcade</title>
+    <link rel="stylesheet" href="./css/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/three.module.js",
+          "three/addons/controls/OrbitControls.js": "./vendor/three/OrbitControls.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport"></div>
+      <div id="sidebar">
+        <canvas id="brain-canvas" width="300" height="380"></canvas>
+        <div id="hint">arrow keys / WASD to steer the snake</div>
+      </div>
+      <div id="overlay">Loading…</div>
+    </div>
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>
