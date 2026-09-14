@@ -245,6 +245,22 @@ same MJCF as the fly body — `frontend/js/fly-body.js` filters these out
 by geom name prefix (`nmf/` vs. everything else) before rendering.
 Worth remembering if a later phase touches `fly.xml` again.
 
+**Phase 1 polish (done).** After first-look feedback, pulled two small
+pieces of later phases forward, both still decorative/scripted rather
+than closing a real loop: (1) the front-left leg now reaches toward the
+joystick on every snake direction change, via a numerical
+coordinate-descent solver in `fly-body.js` (adjusts coxa-yaw/coxa-pitch/
+femur-pitch qpos to minimize the tarsus tip's distance to the joystick
+ball, verified against real `mj_forward` output rather than trusting
+closed-form trig on the joints' local axis conventions) — the joystick
+itself also tilts toward the current direction
+(`cabinet-scene.js`'s `setJoystickTilt`); (2) the brain panel
+(`brain-viz.js`) now renders a real 3D point cloud using actual MaleCNS
+soma positions for the Phase 0 candidate subset
+(`frontend/assets/brain-subset.json`, ~22.7k points, derived locally
+from already-downloaded data — see THIRD_PARTY_NOTICES.md) instead of a
+synthetic 2D layout, still only decoratively pulsing on game events.
+
 **Phase 2 — Real connectome visualization.** Python/CUDA backend
 simulates the real MaleCNS functional subset (LIF), streams spikes over
 WebSocket. Brain panel renders real activity on the full-connectome

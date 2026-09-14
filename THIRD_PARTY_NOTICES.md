@@ -36,14 +36,23 @@ projects, listed below.
 
 ## MaleCNS v1.0 connectome data
 
-- Not redistributed in this repository (see `.gitignore`'s `data/`
-  entry) — downloaded directly from Janelia's public bulk export for
-  local analysis only.
+- The raw dataset itself is not redistributed in this repository (see
+  `.gitignore`'s `data/` entry) — downloaded directly from Janelia's
+  public bulk export for local analysis only.
+- `frontend/assets/brain-subset.json` **is** committed and **is**
+  derived from this dataset: real 3D soma positions (from
+  `body-annotations-male-cns-v1.0-minconf-0.5.feather`'s `somaLocation`
+  field) for the ~22.7k-neuron candidate functional subset identified in
+  Phase 0 (motion pathway / central complex / descending neurons — see
+  `docs/architecture-plan.md`), centered and rescaled, with each point
+  tagged only by its cluster (motion/cx/dn) — no per-neuron type names,
+  IDs, or connectivity are included. Used by `frontend/js/brain-viz.js`
+  to render a real, anatomically-shaped point cloud; the pulsing shown
+  on game events remains decorative/scripted, not simulated activity.
 - License: CC-BY. Attribution: FlyEM/HHMI Janelia, University of
   Cambridge/MRC LMB, and Google Research. Citation: "Sexual dimorphism in
   the complete connectome of the Drosophila male central nervous
   system," bioRxiv DOI 10.1101/2025.10.09.680999.
 - A handful of real neuron type names from this dataset (e.g. T4, T5,
-  EPG, DNa01) are used as labels in `frontend/js/brain-viz.js`'s
-  decorative diagram; no connectome structure or activity data is used
-  or redistributed there.
+  EPG, DNa01) were also used as labels in the brain panel's earlier 2D
+  version; the current 3D point cloud omits per-point labels.
