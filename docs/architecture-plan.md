@@ -227,12 +227,23 @@ findings above). Landed on a concrete candidate subset: motion pathway
 neurons (1,314) = 22,414 neurons, with the input-completeness caveat
 noted above.
 
-**Phase 1 — Visual skeleton.** Cherry-picked MuJoCo/NeuroMechFly body,
-arcade cabinet scene, Snake screen (scripted/keyboard-controlled),
+**Phase 1 — Visual skeleton (done).** Cherry-picked MuJoCo/NeuroMechFly
+body, arcade cabinet scene, Snake screen (scripted/keyboard-controlled),
 a decorative brain animation synced to game events (similar in spirit to
 fly-parking-lab's, explicitly not real neural data yet). Leg movement is
 scripted/procedural, no MuJoCo contact physics. Goal: visually
 convincing, no real neural data involved yet.
+
+Implemented as a static, no-build-step page under `frontend/` (plain ES
+modules + import map — no bundler, per the tooling decision above). The
+fly's idle animation plays back NeuroMechFly's own recorded
+walking-cycle joint angles (`model_meta.json`'s `preprogrammed.legs`)
+via `mj_forward` only (kinematics, no `mj_step`/contact dynamics).
+Noteworthy find: the cherry-picked `fly.xml` bundles fly-parking-lab's
+driving-course markers (`gate*`, `ground_plane`, `start_pole_*`) in the
+same MJCF as the fly body — `frontend/js/fly-body.js` filters these out
+by geom name prefix (`nmf/` vs. everything else) before rendering.
+Worth remembering if a later phase touches `fly.xml` again.
 
 **Phase 2 — Real connectome visualization.** Python/CUDA backend
 simulates the real MaleCNS functional subset (LIF), streams spikes over
