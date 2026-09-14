@@ -106,6 +106,10 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
     draw();
   }
 
+  function getDirection() {
+    return dir;
+  }
+
   reset();
-  return { canvas, update };
+  return { canvas, update, getDirection };
 }

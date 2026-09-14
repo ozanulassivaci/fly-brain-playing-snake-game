@@ -10,7 +10,7 @@ const overlay = document.getElementById('overlay');
 const viewport = document.getElementById('viewport');
 const fail = makeFailOverlay(overlay);
 
-const TARGET_FLY_HEIGHT = 0.3; // meters, sized relative to the cabinet's control panel
+const TARGET_FLY_HEIGHT = 0.38; // meters, sized relative to the cabinet's control panel
 
 async function main() {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -40,7 +40,7 @@ async function main() {
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
-  const { group: cabinetGroup, screen } = createCabinetScene();
+  const { group: cabinetGroup, screen, joystickBall, setJoystickTilt } = createCabinetScene();
   scene.add(cabinetGroup);
 
   overlay.textContent = 'Loading MuJoCo (WebAssembly)…';
@@ -61,17 +61,17 @@ async function main() {
   const size = box.getSize(new THREE.Vector3());
   const scale = TARGET_FLY_HEIGHT / Math.max(size.x, size.y, size.z, 1e-6);
   const center = box.getCenter(new THREE.Vector3());
-  const rotationY = Math.PI / 2;
+  const rotationY = (3 * Math.PI) / 2;
   flyWrapper.scale.setScalar(scale);
   flyWrapper.rotation.y = rotationY;
   // position is set so the *rotated, scaled* bounding-box center (not the
   // raw local center) lands at the target world point next to the joystick.
-  const targetPosition = new THREE.Vector3(-0.5, 0.85, 0.6);
+  const targetPosition = new THREE.Vector3(-0.2, 0.79, 0.5);
   const centerOffset = center.clone().multiplyScalar(scale).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
   flyWrapper.position.copy(targetPosition).sub(centerOffset);
 
   const brainCanvas = document.getElementById('brain-canvas');
-  const brainViz = createBrainViz(brainCanvas);
+  const brainViz = await createBrainViz(brainCanvas);
 
   const snake = createSnakeGame({
     onMove: () => brainViz.pulse('move'),
@@ -84,6 +84,24 @@ async function main() {
 
   overlay.classList.add('hidden');
 
+  // On every snake direction change: tilt the joystick that way and have the
+  // front-left leg reach toward it for a moment (see fly-body.js's
+  // solveReach). Purely cosmetic sync with the game, not a real control loop
+  // (that's Phase 3) — but real IK against the real skeleton, not a canned pose.
+  let lastDir = [0, 0];
+  let reachTriggeredAt = -Infinity;
+  const REACH_RAMP = 0.15,
+    REACH_HOLD = 0.15,
+    REACH_DECAY = 0.4;
+  function reachEnvelope(elapsed) {
+    if (elapsed < 0) return 0;
+    if (elapsed < REACH_RAMP) return elapsed / REACH_RAMP;
+    if (elapsed < REACH_RAMP + REACH_HOLD) return 1;
+    if (elapsed < REACH_RAMP + REACH_HOLD + REACH_DECAY) return 1 - (elapsed - REACH_RAMP - REACH_HOLD) / REACH_DECAY;
+    return 0;
+  }
+
+  const _targetWorld = new THREE.Vector3();
   let last = performance.now() / 1000;
   function frame(nowMs) {
     requestAnimationFrame(frame);
@@ -91,7 +109,17 @@ async function main() {
     const dt = Math.min(0.1, now - last);
     last = now;
 
-    fly.update(now);
+    const dir = snake.getDirection();
+    if (dir[0] !== lastDir[0] || dir[1] !== lastDir[1]) {
+      lastDir = dir;
+      setJoystickTilt(dir[0], dir[1]);
+      joystickBall.getWorldPosition(_targetWorld);
+      const targetLocal = flyWrapper.worldToLocal(_targetWorld.clone());
+      fly.triggerReach(targetLocal);
+      reachTriggeredAt = now;
+    }
+
+    fly.update(now, reachEnvelope(now - reachTriggeredAt));
     snake.update(dt);
     screenTexture.needsUpdate = true;
     brainViz.render(now);

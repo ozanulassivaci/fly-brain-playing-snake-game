@@ -36,19 +36,30 @@ export function createCabinetScene() {
   joystickBase.position.set(-0.12, 0.79, 0.46);
   group.add(joystickBase);
 
+  // Stick + ball pivot at the base, so tilting is a single local rotation.
+  const joystickPivot = new THREE.Group();
+  joystickPivot.position.set(-0.12, 0.805, 0.46);
+  group.add(joystickPivot);
+
   const joystickStick = new THREE.Mesh(
     new THREE.CylinderGeometry(0.008, 0.008, 0.12, 12),
     new THREE.MeshStandardMaterial({ color: 0x444444 }),
   );
-  joystickStick.position.set(-0.12, 0.85, 0.46);
-  group.add(joystickStick);
+  joystickStick.position.set(0, 0.06, 0);
+  joystickPivot.add(joystickStick);
 
   const joystickBall = new THREE.Mesh(
     new THREE.SphereGeometry(0.022, 16, 12),
     new THREE.MeshStandardMaterial({ color: 0xdd2222 }),
   );
-  joystickBall.position.set(-0.12, 0.91, 0.46);
-  group.add(joystickBall);
+  joystickBall.position.set(0, 0.12, 0);
+  joystickPivot.add(joystickBall);
+
+  const MAX_TILT = 0.35; // radians
+  function setJoystickTilt(dx, dy) {
+    joystickPivot.rotation.z = -dx * MAX_TILT;
+    joystickPivot.rotation.x = dy * MAX_TILT;
+  }
 
   const buttonColors = [0xdddd22, 0x22aadd, 0x22dd66];
   buttonColors.forEach((color, i) => {
@@ -60,5 +71,5 @@ export function createCabinetScene() {
     group.add(button);
   });
 
-  return { group, screen };
+  return { group, screen, joystickBall, setJoystickTilt };
 }
