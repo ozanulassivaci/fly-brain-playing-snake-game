@@ -79,7 +79,7 @@ async function main() {
   flyWrapper.quaternion.copy(finalQuat);
   // position is set so the *rotated, scaled* bounding-box center (not the
   // raw local center) lands at the target world point next to the joystick.
-  const targetPosition = new THREE.Vector3(-0.24, 0.82, 0.56);
+  const targetPosition = new THREE.Vector3(-0.12, 0.82, 0.75);
   const centerOffset = center.clone().multiplyScalar(scale).applyQuaternion(finalQuat);
   flyWrapper.position.copy(targetPosition).sub(centerOffset);
 
@@ -104,7 +104,7 @@ async function main() {
   let lastDir = [0, 0];
   let reachTriggeredAt = -Infinity;
   const REACH_RAMP = 0.15,
-    REACH_HOLD = 0.15,
+    REACH_HOLD = 0.35,
     REACH_DECAY = 0.4;
   function reachEnvelope(elapsed) {
     if (elapsed < 0) return 0;
