@@ -116,17 +116,11 @@ male-cns-specific documentation.
   DN type catalogs (2025 Nature comparative connectomics paper; 2025
   bioRxiv split-GAL4 DN driver catalogue) cross-referenced against
   male-cns type names.
-- **Realistic subset size**: optic lobe ~53,000 neurons / 732 types
-  (male-cns-specific, confirmed). Central complex ~3,000 neurons
-  (hemibrain analogy, not male-cns-specific). Descending neurons
-  ~1,300 (MANC-specific count). So "optic lobe + CX + DN" is still
-  ~55–60k neurons — too large for a first real-time target. We will
-  likely need a much smaller sub-subset (specific types most relevant to
-  motion/turning, probably low thousands or fewer) for the actual live
-  simulation; the rest of the loaded subset can remain structural/
-  decorative. Synapse count for this subset is unconfirmed for
-  male-cns specifically; order-of-magnitude tens of millions based on
-  hemibrain's ratio (extrapolation, not a published figure).
+- **Realistic subset size (superseded by empirical findings below)**:
+  literature-based estimate was optic lobe ~53,000 neurons, central
+  complex ~3,000 (hemibrain analogy), descending neurons ~1,300
+  (MANC-specific). Real male-cns data (see below) shows the optic lobe
+  is actually much bigger than this estimate.
 - **License**: CC-BY, attribution required (FlyEM/HHMI Janelia +
   Cambridge/MRC LMB + Google Research; cite the *Cell* paper, bioRxiv
   DOI 10.1101/2025.10.09.680999). No stated commercial-use or
@@ -136,16 +130,85 @@ male-cns-specific documentation.
   This is separate from and in addition to the NeuroMechFly model's own
   Apache 2.0 license, which only covers the biomechanical model assets.
 
-Open question for the next Phase 0 step: what is the real neuron/type
-distribution once we actually query or download the data, and which
-concrete types should the live-simulated sub-subset consist of?
+## Empirical findings from real MaleCNS v1.0 data (2026-09-14)
+
+Downloaded directly from the public bulk export
+(`gs://flyem-male-cns/v1.0/connectome-data/flat-connectome/`, no
+account needed, confirmed publicly listable via the GCS JSON API):
+`body-annotations-male-cns-v1.0-minconf-0.5.feather` (211,577 bodies,
+36 annotation columns including `type`, `superclass`, `status`) and
+`connectome-weights-male-cns-v1.0-minconf-0.5-significant-only.feather`
+(25.6M weighted connections, columns `body_pre`, `body_post`, `weight`,
+`type_pre`, `type_post`). Files kept locally under `data/raw/`
+(gitignored, not committed — see licensing note above on attribution
+requirements if this data or derivatives are ever published).
+
+**Real neuron counts** (filtering to `status == 'Traced'`, 165,122
+neurons total — matches the project's stated 166,700 closely):
+
+| Group | Filter used | Count |
+| --- | --- | --- |
+| Optic lobe (all visual superclasses) | `superclass` in `{ol_intrinsic, ol_sensory, visual_projection, visual_centrifugal}` | 103,268 |
+| Motion/looming pathway only | `type` matches `T4`, `T5`, `LC*`, `LPLC*`, `LT*` | 18,457 |
+| — of which core motion detectors | `type` matches `T4`, `T5` | 13,585 |
+| Central complex | `type` matches known CX type prefixes (EPG, PEN, PFN, hDelta, FB*, EB, PB, NO, ...) | 2,643 |
+| Descending neurons | `superclass == 'descending_neuron'` | 1,314 |
+
+The full optic lobe (103k) is ~2x the literature-based estimate and is
+~62% of the entire traced connectome — far too large for a first
+real-time simulation target. The motion/looming pathway (T4/T5 + LC/
+LPLC/LT) is a much smaller, biologically meaningful proxy for what a
+Snake-playing fly actually needs (direction of movement, collision/
+approach cues) rather than full visual acuity.
+
+**Candidate functional subset: motion pathway + CX + DN = 22,414
+neurons** (~14% of the full connectome). Its internal connectivity:
+1,097,787 edges fully inside the subset, average out-degree ~49.
+
+**Important caveat found while checking this candidate subset**: it is
+not a self-contained circuit. Checking what fraction of each group's
+inputs come from within the 22,414-neuron subset itself:
+
+| Group | Inputs from within subset |
+| --- | --- |
+| Motion pathway (T4/T5/LC/LPLC/LT) | 25.7% |
+| Central complex | 76.5% |
+| Descending neurons | 16.1% |
+
+The motion pathway's missing 74% of input comes from earlier optic lobe
+layers (Mi1, Tm1-9, etc.) that were deliberately excluded — this is
+expected and acceptable, since Phase 3's plan already calls for
+injecting a synthetic "motion energy" signal derived from the Snake
+screen directly into this layer rather than simulating the full deep
+visual pathway. Central complex is well-preserved (76.5% internal) —
+its real ring-attractor/heading-integration dynamics are worth actually
+simulating. Descending neurons are the weak point: only 16.1% of their
+real input is captured, so simulating realistic DN spiking dynamics
+from this subset alone would be misleading. Decision: treat CX output →
+DN as a simplified categorical mapping (CX heading/turn signal → a
+handful of well-known steering-related DN types, e.g. DNa01/DNa02-like)
+rather than expecting biologically faithful DN spike trains. This is
+consistent with the project's own framing of the reward/steering signal
+as behavioral shaping, not real learning.
+
+Remaining Phase 0 open question: central complex was selected here by
+matching known type-name prefixes (EPG, PEN, PFN, hDelta, FB*, ...)
+against the `type` column, not by the ROI (`roiInfo`) field, since
+`roiInfo` isn't present in the annotations table we downloaded — it
+likely lives in a separate table or requires a neuPrint query. Worth a
+cross-check against ROI-based filtering before finalizing the subset,
+in case the name-prefix heuristic missed or over-included types.
 
 ## Phase breakdown
 
-**Phase 0 — Data discovery (current phase).** Confirm real access
-method, schema, and realistic subset size by actually pulling MaleCNS
-data (bulk export or a neuPrint sample query), not just reading docs.
-Decide the concrete list of neuron types that will be live-simulated.
+**Phase 0 — Data discovery (done).** Confirmed real access method
+(public GCS bulk export, no account needed), schema (separate
+annotation/weight tables), and — critically — real neuron/connectivity
+counts by downloading and querying the actual data (see empirical
+findings above). Landed on a concrete candidate subset: motion pathway
+(T4/T5/LC/LPLC/LT, 18,457) + central complex (2,643) + descending
+neurons (1,314) = 22,414 neurons, with the input-completeness caveat
+noted above.
 
 **Phase 1 — Visual skeleton.** Cherry-picked MuJoCo/NeuroMechFly body,
 arcade cabinet scene, Snake screen (scripted/keyboard-controlled),
@@ -167,11 +230,14 @@ Phase 1 scripted animation here.
 
 ## Open risks / unresolved questions
 
-- Exact neuron types to include in the live-simulated sub-subset (needs
-  real data inspection, Phase 0 next step).
-- Whether the ROI ontology and DN `class` field used by hemibrain/MANC
-  apply identically to male-cns (assumed, not yet confirmed against the
-  actual downloaded schema).
+- Central complex subset was picked by type-name prefix matching, not
+  ROI filtering (`roiInfo` not present in the downloaded annotations
+  table) — cross-check before finalizing.
+- Descending neurons only receive 16.1% of their real input from within
+  the candidate subset — decided to treat CX → DN as a simplified
+  categorical mapping rather than simulating realistic DN spiking (see
+  empirical findings above). Revisit if this looks too artificial once
+  something is actually running.
 - Confirm exact MaleCNS license version/terms before any public
   redistribution of derived data.
 - WebGPU in-browser simulation was rejected for now but could be
