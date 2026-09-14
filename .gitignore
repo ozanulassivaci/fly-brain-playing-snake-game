@@ -12,7 +12,8 @@ __pycache__/
 venv/
 *.egg-info/
 
-# WASM build artifacts
+# WASM build artifacts (vendored runtime builds we intentionally commit are
+# force-added, e.g. frontend/vendor/mujoco/mujoco.wasm)
 *.wasm
 *.wat
 target/
