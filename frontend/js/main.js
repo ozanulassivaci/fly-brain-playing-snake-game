@@ -67,7 +67,7 @@ async function main() {
   // comparing screenshots across both axes). rotationY then sets which way
   // it faces once actually standing upright.
   const rotationX = -Math.PI / 2;
-  const rotationY = 0;
+  const rotationY = -Math.PI / 4;
   const euler = new THREE.Euler(rotationX, rotationY, 0);
   flyWrapper.scale.setScalar(scale);
   flyWrapper.rotation.copy(euler);
