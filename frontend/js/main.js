@@ -61,13 +61,20 @@ async function main() {
   const size = box.getSize(new THREE.Vector3());
   const scale = TARGET_FLY_HEIGHT / Math.max(size.x, size.y, size.z, 1e-6);
   const center = box.getCenter(new THREE.Vector3());
-  const rotationY = (3 * Math.PI) / 2;
+  // MuJoCo's model is Z-up; Three.js is Y-up. rotationX corrects for that
+  // (without it the fly renders lying on its side, on top of a Y-heading
+  // rotation that just spins it while still lying down — confirmed by
+  // comparing screenshots across both axes). rotationY then sets which way
+  // it faces once actually standing upright.
+  const rotationX = -Math.PI / 2;
+  const rotationY = 0;
+  const euler = new THREE.Euler(rotationX, rotationY, 0);
   flyWrapper.scale.setScalar(scale);
-  flyWrapper.rotation.y = rotationY;
+  flyWrapper.rotation.copy(euler);
   // position is set so the *rotated, scaled* bounding-box center (not the
   // raw local center) lands at the target world point next to the joystick.
-  const targetPosition = new THREE.Vector3(-0.2, 0.79, 0.5);
-  const centerOffset = center.clone().multiplyScalar(scale).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
+  const targetPosition = new THREE.Vector3(-0.24, 0.82, 0.56);
+  const centerOffset = center.clone().multiplyScalar(scale).applyEuler(euler);
   flyWrapper.position.copy(targetPosition).sub(centerOffset);
 
   const brainCanvas = document.getElementById('brain-canvas');
