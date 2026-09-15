@@ -126,11 +126,23 @@ HEADING_RING_SIZE = 9
 HEADING_SCALE = 1.0
 HEADING_SIGMA = 1.5  # bump width in ring positions (matches GOAL_SIGMA: same-sized 9-position ring)
 
-# Set from direct multi-trial measurement against this specific readout
-# population (see the standalone test run before committing this), not
-# guessed or carried over from the old aggregate's noise floor.
+# Phase 3.3 follow-up: a real gap between these two (OFF well below ON, a
+# genuine hysteresis band) was measured to hold a "left"/"right" decision
+# for a long time once triggered — a real sustained bias during injection
+# rarely dips all the way back down to a small OFF threshold, so median
+# hold length was ~5.3 game ticks and the tail reached ~41 ticks (~6
+# seconds) at TURN_OFF_THRESH=0.00003. That's long enough for even
+# one-turn-per-tick to spin the snake through several full rotations
+# during a single hold, and long enough that a single edge-triggered turn
+# leaves it going straight for multiple seconds — the source of both the
+# circling bug and the "turns too late, hits a wall" bug reported after
+# playing. Measured directly (sweep_off_thresh.py-style test) that
+# removing the hysteresis band entirely (OFF == ON) shrinks hold length to
+# a median of ~1.6 ticks and a max of ~6.8 ticks — short enough that plain
+# once-per-tick turning (frontend/js/snake-game.js) no longer needs a
+# game-layer cooldown/edge-trigger workaround to avoid visible spinning.
 TURN_ON_THRESH = 0.0001
-TURN_OFF_THRESH = 0.00003
+TURN_OFF_THRESH = 0.0001
 
 
 class LifSimulation:

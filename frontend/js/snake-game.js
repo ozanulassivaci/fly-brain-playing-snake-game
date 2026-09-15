@@ -1,25 +1,18 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
-// Minimum game ticks between two executed turns. The backend's own
-// hysteresis (see backend/lif.py's _update_motor) holds a "left"/"right"
-// decision for a while once triggered (measured: anywhere from ~10 to
-// ~200+ broadcasts, i.e. up to several real seconds) rather than flipping
-// every broadcast. Turning once per *tick* the decision holds spins the
-// snake in tight circles (measured and fixed); turning only once per
-// straight->left/right *transition* and then going straight until the next
-// one was tried next and made the snake travel straight for long stretches,
-// often into a wall, before the next transition ever came (this project's
-// 20x20 grid is smaller than a multi-second hold period at
-// TICK_SECONDS=0.15). This cooldown re-executes a turn every
-// MIN_TURN_TICKS ticks for as long as the decision holds, instead of never
-// again (too rare) or every tick (spins) — a reasonable middle ground for
-// avoiding both known-bad extremes, not a value with a measured effect on
-// apple-eating success: repeated multi-trial testing (see
-// docs/architecture-plan.md's Phase 3.3 section) found no configuration of
-// this project's circuit, cadence included, that reliably beat having no
-// goal information at all — results replicated in the opposite direction
-// as often as not.
-const MIN_TURN_TICKS = 2;
+// Brain-controlled only (Phase 3) — no keyboard input. Earlier attempts to
+// fix a spinning-in-circles bug worked around it in this game layer
+// (edge-triggering, then a fixed turn cooldown) instead of fixing the real
+// cause: backend/lif.py's motor hysteresis held a "left"/"right" decision
+// for a long time once triggered (measured: median ~5.3 game ticks, tail
+// out to ~41 ticks / ~6 real seconds, at the old TURN_ON/OFF_THRESH gap),
+// long enough that even a capped cooldown still produced many repeated
+// same-direction turns during one hold — still visibly circling — or, at
+// the other extreme, one turn followed by many seconds straight into a
+// wall. Fixed at the source instead: TURN_OFF_THRESH now equals
+// TURN_ON_THRESH (no hysteresis band), which measured out to a median
+// hold of ~1.6 ticks and a max of ~6.8 ticks — short enough that plain
+// once-per-tick turning below doesn't need a workaround.
 function rotateLeft([dx, dy]) {
   return [dy, -dx];
 }
@@ -33,7 +26,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, pendingMotorTurn, ticksSinceTurn, apple, alive, tickAcc, restartAcc;
+  let snake, dir, currentMotorTurn, apple, alive, tickAcc, restartAcc;
 
   function reset() {
     snake = [
@@ -42,8 +35,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
       { x: Math.floor(cols / 2) - 2, y: Math.floor(rows / 2) },
     ];
     dir = [1, 0];
-    pendingMotorTurn = null;
-    ticksSinceTurn = MIN_TURN_TICKS;
+    currentMotorTurn = 'straight';
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
@@ -57,15 +49,12 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   }
 
   function applyTurn(turn) {
-    pendingMotorTurn = turn !== 'straight' ? turn : null;
+    currentMotorTurn = turn;
   }
 
   function step() {
-    ticksSinceTurn++;
-    if (pendingMotorTurn && ticksSinceTurn >= MIN_TURN_TICKS) {
-      dir = pendingMotorTurn === 'left' ? rotateLeft(dir) : rotateRight(dir);
-      ticksSinceTurn = 0;
-    }
+    if (currentMotorTurn === 'left') dir = rotateLeft(dir);
+    else if (currentMotorTurn === 'right') dir = rotateRight(dir);
     const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
 
     const hitWall = head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows;
