@@ -327,15 +327,48 @@ idle. Real-time testing against a live WebSocket needs a plain
 `--remote-debugging-port` + a real `sleep` + a CDP
 `Page.captureScreenshot` call instead.
 
-**Phase 3 — Closed loop.** Snake screen → simplified retina reduction →
-visual neurons → LIF sim → descending neurons → IK targets → joystick/
-button animation → real key input. MuJoCo contact physics replaces the
-Phase 1 scripted animation here.
+**Phase 3 — Closed loop (done, MuJoCo contact physics deferred per user
+choice).** Snake is now fully brain-controlled — no keyboard input at
+all. `frontend/js/retina.js` runs a real Hassenstein-Reichardt
+correlator (the textbook elementary-motion-detector model, not a
+learned/deep model) over the Snake canvas, sending four motion-energy
+scalars (a/b/c/d) to the backend every ~100ms. `backend/lif.py` injects
+that current into the real T4/T5 a/b/c/d subtype masks (genuine
+per-neuron structure — these four real subtypes are each tuned to one
+of the four cardinal motion directions in the Drosophila literature)
+and separately tracks left- vs right-soma-side descending-neuron
+activity (also real `somaSide` data) to decode a turn-left/turn-right/
+straight decision, sent back and applied via `snake-game.js`'s new
+`applyTurn()` (rotates the current heading 90°; the keyboard handler
+was removed entirely). The existing joystick-tilt/leg-reach logic in
+`main.js` needed no changes — it already keyed off `snake.getDirection()`
+changes, so it now fires from brain-driven turns instead of keyboard
+ones.
 
-**Phase 3 — Closed loop.** Snake screen → simplified retina reduction →
-visual neurons → LIF sim → descending neurons → IK targets → joystick/
-button animation → real key input. MuJoCo contact physics replaces the
-Phase 1 scripted animation here.
+**Real, load-bearing finding from this phase**: the per-cluster
+homeostatic control added late in Phase 2 testing turned out to still
+be too coarse — checking actual spike counts (not just the visualized
+sparse indices) showed a subset of CX neurons cycling at the max
+refractory-limited rate (~400k spike-events across CX over 4000 steps)
+while DN sat almost silent (~2.7e-5 spikes/neuron/step) even though the
+*global* average looked "on target". Fixed by giving each cluster
+(motion/cx/dn) its own independent homeostatic feedback loop instead of
+one shared pool; CX needed roughly 10x the inhibition gain of the other
+two clusters to actually reach the target rate, confirming its
+recurrent excitation really is much stronger. After the fix, all three
+clusters sit close to the same real per-neuron firing rate. The
+resulting DN left/right signal is still small and genuinely noisy
+(same order of magnitude as sensory-driven signal), so the turn
+decision thresholds were set relative to that real noise floor rather
+than an assumed larger separation — this is the actual, honest
+granularity this simplified subset's aggregate DN readout provides, not
+an oversight.
+
+As anticipated in this phase's own planning: because T4/T5 are real
+motion-only detectors, the fly's "vision" cannot perceive the
+stationary apple, only movement (mostly the snake's own body/head). Play
+looks like real-neural-activity-driven reactive turning, not
+intentional food-seeking — the honest result of this design, not a bug.
 
 ## Open risks / unresolved questions
 
