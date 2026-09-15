@@ -197,12 +197,18 @@ class LifSimulation:
 
         # Extra named populations tracked only for the frontend decision-flow
         # panel (not used to drive any dynamics beyond the homeostatic split
-        # above) — real PFL/FC group activity so that panel shows genuine
-        # values, not a decorative animation. Reuses the same masks as the
-        # cluster split, so "fc"/"pfl" here are identical populations to
-        # cluster_masks["fc"]/["pfl"].
+        # above) — real per-type-group activity so the panel shows genuine
+        # values for genuine anatomical populations, not a decorative
+        # animation. Motion is broken into its real T4/T5 a/b/c/d direction
+        # subtypes (same self.direction_masks already used for sensory
+        # injection) instead of one aggregate, matching the original Phase 1
+        # panel's per-type-column layout; epg/fc/pfl/dna_left/dna_right reuse
+        # the same masks as the homeostatic cluster split above.
         self.group_masks = {
-            "motion": self.cluster_masks["motion"],
+            "motion_a": self.direction_masks["a"],
+            "motion_b": self.direction_masks["b"],
+            "motion_c": self.direction_masks["c"],
+            "motion_d": self.direction_masks["d"],
             "epg": self.cluster_masks["epg"],
             "fc": self.cluster_masks["fc"],
             "pfl": self.cluster_masks["pfl"],
