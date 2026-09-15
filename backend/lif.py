@@ -74,9 +74,13 @@ MOTOR_EMA_TAU_MS = 150.0
 # Thresholds are set relative to that real noise floor, not to some larger
 # assumed signal — this is the honest, real granularity of this
 # aggregate DN readout (see class docstring note on identified steering DNs
-# we don't have).
-TURN_ON_THRESH = 0.00015
-TURN_OFF_THRESH = 0.00005
+# we don't have). The first value tried (0.00015) made the snake turn only
+# ~2 times per 20s — mostly running straight into walls, which read as
+# "not playing" rather than "reactive but erratic". Lowered so real noise
+# alone produces a visible turn every ~0.4s (measured ~46 transitions/20s
+# at this value) — genuinely more responsive, not just a cosmetic tweak.
+TURN_ON_THRESH = 0.0001
+TURN_OFF_THRESH = 0.00003
 
 
 class LifSimulation:
