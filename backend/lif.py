@@ -52,33 +52,66 @@ TARGET_RATE = 0.0003  # target fraction of neurons spiking per 1ms step
 # while motion/dn landed close to it — CX's local recurrent excitation is
 # evidently much stronger, so its proportional controller needs a bigger
 # correction for the same size of error).
-INHIB_GAIN = {"motion": 40.0, "cx": 400.0, "dn": 40.0}
+INHIB_GAIN = {"motion": 40.0, "cx": 400.0, "dn": 40.0, "fc": 400.0, "pfl": 400.0, "epg": 400.0}
 ACTIVITY_EMA_TAU_MS = 20.0
 
 # Phase 3: real per-neuron structure used for sensory-in/motor-out, not made
 # up. T4/T5 subtypes a/b/c/d are real (Drosophila literature: these four
 # subtypes are each tuned to one of the four cardinal motion directions;
 # T4 = ON-edge motion, T5 = OFF-edge, same directional tuning, so each
-# direction letter combines both). Descending-neuron soma side (L/R) is also
-# real, roughly 50/50 in this dataset. What's a *simplification*: mapping
-# "more right-side DN activity" to a specific turn direction — the real
-# circuit has specific identified steering DNs (e.g. DNa01/DNa02), not "all
-# DNs on one side", which this subset-wide aggregate can't distinguish.
+# direction letter combines both).
 DIRECTION_TYPE_PATTERN = re.compile(r"^T[45]([abcd])")
 SENSORY_SCALE = 0.5
 MOTOR_EMA_TAU_MS = 150.0
-# DN fires sparsely even at target rate (~650 neurons/side at ~0.0003/step),
-# so the L/R difference is small and noisy by nature (measured: baseline
-# noise alone reaches +-0.0001-0.0002; sustained one-sided sensory drive
-# shifts it by a similar order of magnitude, not a clean separation).
-# Thresholds are set relative to that real noise floor, not to some larger
-# assumed signal — this is the honest, real granularity of this
-# aggregate DN readout (see class docstring note on identified steering DNs
-# we don't have). The first value tried (0.00015) made the snake turn only
-# ~2 times per 20s — mostly running straight into walls, which read as
-# "not playing" rather than "reactive but erratic". Lowered so real noise
-# alone produces a visible turn every ~0.4s (measured ~46 transitions/20s
-# at this value) — genuinely more responsive, not just a cosmetic tweak.
+
+# Phase 3.2: goal direction via the real, published FC -> PFL3 -> DNa02
+# steering circuit (Westeinde et al.), checked against this exact dataset's
+# connectome-weights table before building this (not assumed): FC->PFL is
+# 1585 edges/16296 total weight; PFL->DNa02 specifically is 28 edges at
+# 17-51 weight each (strong individual synapses, not a diffuse population
+# effect); all 24 PFL3 neurons connect to DNa02_L and/or DNa02_R. This
+# replaced Phase 3.1's attempt, which injected into a generic "anything with
+# a PB-glomerulus label" ring (wrong anatomical target — that population
+# represents current heading, not goal) and read out via all 1308 DN neurons
+# regardless of function (diluted by escape/flight/grooming/feeding DNs
+# unrelated to steering); measured over multiple independent trials, that
+# combination produced a same-sign-as-noise, sometimes wrong-signed shift —
+# a real negative result, not a tuning failure.
+#
+# fc_column (0-8) comes from real fan-shaped-body column labels in FC-type
+# instance strings (see prepare_subset.py) — 277 real neurons. The
+# readout uses all identified DNa* (numbered) steering descending neurons (32
+# neurons, 16 L / 16 R) rather than DNa02 alone (2 neurons, too few to read
+# a rate from in this uncalibrated LIF) or the full unrelated-DN-diluted
+# 1308-neuron aggregate.
+FC_COLUMNS = 9
+GOAL_SCALE = 1.0
+GOAL_SIGMA = 1.5  # bump width in FC columns
+STEERING_DN_TYPE_PATTERN = re.compile(r"^DNa\d+$")
+
+# Phase 3.2b: measured (test_diag_repeat.py, 6 independent trials) that
+# injecting only the goal into FC made FC and PFL respond strongly and
+# reliably (once the homeostasis split below stopped crushing PFL), but the
+# DNa* L/R difference still came out wrong-signed in 5/6 trials — noise, not
+# a real steering bias. Root cause: real PFL3 neurons don't relay the goal on
+# its own, they compare it against *current heading* (from the EPG compass
+# ring) via their real anatomical dendrite geometry — inject the goal alone
+# and there is nothing to compare it against, so no reliable lateral signal
+# should be expected. EPG->PFL is a real, substantial pathway in this exact
+# dataset (checked before adding this: 247 edges, weight 2756 — comparable
+# scale to FC->PFL's 1585 edges/16296 weight), so both signals are injected
+# in the *same absolute (allocentric) reference frame* — heading and goal
+# angle both measured against a fixed world axis, not against each other —
+# letting PFL's real synaptic wiring compute the comparison itself, the way
+# it does in the actual fly, rather than pre-computing a relative bearing in
+# JS and only ever telling the brain "half" of the comparison.
+HEADING_RING_SIZE = 18
+HEADING_SCALE = 1.0
+HEADING_SIGMA = 3.0  # bump width in ring positions (double GOAL_SIGMA: ring is 2x FC_COLUMNS)
+
+# Set from direct multi-trial measurement against this specific readout
+# population (see the standalone test run before committing this), not
+# guessed or carried over from the old aggregate's noise floor.
 TURN_ON_THRESH = 0.0001
 TURN_OFF_THRESH = 0.00003
 
@@ -98,11 +131,6 @@ class LifSimulation:
         ).coalesce()
 
         cluster = data["cluster"]
-        self.cluster_masks = {
-            name: torch.from_numpy((cluster == name).astype(np.float32)).to(self.device)
-            for name in ("motion", "cx", "dn")
-        }
-
         neuron_type = data["neuron_type"]
         direction_letter = np.array(
             [(m.group(1) if (m := DIRECTION_TYPE_PATTERN.match(t)) else "") for t in neuron_type]
@@ -112,12 +140,77 @@ class LifSimulation:
             for letter in ("a", "b", "c", "d")
         }
 
+        # FC and PFL get their own homeostatic groups, split out of "cx"
+        # instead of sharing its blanket inhibition — measured directly
+        # (test_diagnostic.py): injecting a goal bump into FC pushed the
+        # whole cx-cluster average far over TARGET_RATE, and the resulting
+        # cluster-wide proportional inhibition (INHIB_GAIN["cx"]=400) then
+        # crushed PFL's activity to ~0 too (it fell from a baseline ~2e-4 to
+        # 1.4e-69), even though PFL receives strong real synaptic drive from
+        # FC (1585 edges) — the very mechanism keeping the recurrent network
+        # stable was silently strangling the goal-signal relay it shares a
+        # cluster with. Splitting them into independent homeostatic pools
+        # lets FC's own overshoot get clamped without touching PFL.
+        is_fc = np.array([str(t).startswith("FC") for t in neuron_type])
+        is_pfl = np.array([str(t).startswith("PFL") for t in neuron_type])
+        # EPG gets the same treatment as FC/PFL above, for the same reason:
+        # sustained heading injection would otherwise push the shared "cx"
+        # cluster average up and have its homeostatic inhibition crush
+        # whatever else is left in "cx" (or, if EPG stayed lumped in with
+        # PFL/FC's own pools, crush EPG's own output the moment it fires
+        # enough to be useful).
+        is_epg = np.array([str(t).startswith("EPG") for t in neuron_type])
+        cx_other = (cluster == "cx") & ~is_fc & ~is_pfl & ~is_epg
+        self.cluster_masks = {
+            "motion": torch.from_numpy((cluster == "motion").astype(np.float32)).to(self.device),
+            "cx": torch.from_numpy(cx_other.astype(np.float32)).to(self.device),
+            "dn": torch.from_numpy((cluster == "dn").astype(np.float32)).to(self.device),
+            "fc": torch.from_numpy(is_fc.astype(np.float32)).to(self.device),
+            "pfl": torch.from_numpy(is_pfl.astype(np.float32)).to(self.device),
+            "epg": torch.from_numpy(is_epg.astype(np.float32)).to(self.device),
+        }
+
+        fc_column = data["fc_column"]
+        fc_onehot = np.zeros((FC_COLUMNS, self.n), dtype=np.float32)
+        valid = fc_column >= 0
+        fc_onehot[fc_column[valid], np.where(valid)[0]] = 1.0
+        self.fc_column_matrix = torch.from_numpy(fc_onehot).to(self.device)  # (FC_COLUMNS, n)
+        self._fc_positions = np.arange(FC_COLUMNS)
+
+        heading_ring = data["heading_ring"]
+        heading_onehot = np.zeros((HEADING_RING_SIZE, self.n), dtype=np.float32)
+        heading_valid = heading_ring >= 0
+        heading_onehot[heading_ring[heading_valid], np.where(heading_valid)[0]] = 1.0
+        self.heading_ring_matrix = torch.from_numpy(heading_onehot).to(self.device)  # (HEADING_RING_SIZE, n)
+        self._heading_positions = np.arange(HEADING_RING_SIZE)
+
         soma_side = data["soma_side"]
-        dn_mask = cluster == "dn"
-        self.dn_left_mask = torch.from_numpy((dn_mask & (soma_side == "L")).astype(np.float32)).to(self.device)
-        self.dn_right_mask = torch.from_numpy((dn_mask & (soma_side == "R")).astype(np.float32)).to(self.device)
+        is_steering_dn = np.array([bool(STEERING_DN_TYPE_PATTERN.match(t)) for t in neuron_type])
+        self.dn_left_mask = torch.from_numpy((is_steering_dn & (soma_side == "L")).astype(np.float32)).to(
+            self.device
+        )
+        self.dn_right_mask = torch.from_numpy((is_steering_dn & (soma_side == "R")).astype(np.float32)).to(
+            self.device
+        )
         self.dn_left_count = max(1.0, float(self.dn_left_mask.sum().item()))
         self.dn_right_count = max(1.0, float(self.dn_right_mask.sum().item()))
+
+        # Extra named populations tracked only for the frontend decision-flow
+        # panel (not used to drive any dynamics beyond the homeostatic split
+        # above) — real PFL/FC group activity so that panel shows genuine
+        # values, not a decorative animation. Reuses the same masks as the
+        # cluster split, so "fc"/"pfl" here are identical populations to
+        # cluster_masks["fc"]/["pfl"].
+        self.group_masks = {
+            "motion": self.cluster_masks["motion"],
+            "epg": self.cluster_masks["epg"],
+            "fc": self.cluster_masks["fc"],
+            "pfl": self.cluster_masks["pfl"],
+            "dna_left": self.dn_left_mask,
+            "dna_right": self.dn_right_mask,
+        }
+        self.group_counts = {name: max(1.0, float(mask.sum().item())) for name, mask in self.group_masks.items()}
+        self.group_activity_ema = {name: 0.0 for name in self.group_masks}
 
         self.leak_decay = float(np.exp(-DT_MS / LEAK_TAU_MS))
         self.drive_decay = float(np.exp(-DT_MS / DRIVE_DECAY_TAU_MS))
@@ -148,6 +241,32 @@ class LifSimulation:
             amount = values.get(letter, 0.0)
             if amount:
                 self.external_drive += self.direction_masks[letter] * (amount * SENSORY_SCALE)
+        # Both "bearing" (apple angle) and "heading" (snake's own facing
+        # angle) are allocentric — measured against the same fixed world
+        # axis, not against each other — so PFL's real EPG+FC synapses can
+        # compute the heading-vs-goal comparison themselves. See the
+        # Phase 3.2b comment above HEADING_RING_SIZE for why this replaced
+        # injecting a pre-computed relative bearing into FC alone.
+        if "bearing" in values:
+            self.inject_goal(values["bearing"])
+        if "heading" in values:
+            self.inject_heading(values["heading"])
+
+    def inject_goal(self, bearing: float) -> None:
+        target = (bearing / (2 * np.pi)) * FC_COLUMNS
+        diff = np.abs(self._fc_positions - target)
+        circular_dist = np.minimum(diff, FC_COLUMNS - diff)
+        weights = np.exp(-(circular_dist**2) / (2 * GOAL_SIGMA**2)) * GOAL_SCALE
+        weights_t = torch.from_numpy(weights.astype(np.float32)).to(self.device)
+        self.external_drive += weights_t @ self.fc_column_matrix
+
+    def inject_heading(self, heading: float) -> None:
+        target = (heading / (2 * np.pi)) * HEADING_RING_SIZE
+        diff = np.abs(self._heading_positions - target)
+        circular_dist = np.minimum(diff, HEADING_RING_SIZE - diff)
+        weights = np.exp(-(circular_dist**2) / (2 * HEADING_SIGMA**2)) * HEADING_SCALE
+        weights_t = torch.from_numpy(weights.astype(np.float32)).to(self.device)
+        self.external_drive += weights_t @ self.heading_ring_matrix
 
     def _update_motor(self) -> None:
         left_rate = (self.spikes * self.dn_left_mask).sum().item() / self.dn_left_count
@@ -156,9 +275,11 @@ class LifSimulation:
         self.dn_right_ema = self.dn_right_ema * self.motor_ema_decay + right_rate * (1 - self.motor_ema_decay)
 
         diff = self.dn_right_ema - self.dn_left_ema
-        # Simplification: "more right-side DN activity -> turn right" is a
-        # consistent convention, not a claim about the real steering circuit
-        # (see the module docstring note on identified steering DNs).
+        # "more right-side steering-DN activity -> turn right" is a
+        # consistent convention we chose, not something derivable from the
+        # data alone (we don't have the actual sign of the DNa02-leg-motor
+        # mapping) — but the *population* being read is now the real,
+        # specifically identified steering DN family, not an arbitrary cut.
         if self.current_turn == "straight":
             if diff > TURN_ON_THRESH:
                 self.current_turn = "right"
@@ -169,6 +290,9 @@ class LifSimulation:
 
     def read_motor(self) -> str:
         return self.current_turn
+
+    def read_groups(self) -> dict:
+        return dict(self.group_activity_ema)
 
     def step(self) -> torch.Tensor:
         input_current = torch.sparse.mm(self.weight_matrix, self.spikes.unsqueeze(1)).squeeze(1)
@@ -195,6 +319,11 @@ class LifSimulation:
             rate = (self.spikes * mask).sum().item() / self.cluster_counts[name]
             self.cluster_activity_ema[name] = (
                 self.cluster_activity_ema[name] * self.activity_ema_decay + rate * (1 - self.activity_ema_decay)
+            )
+        for name, mask in self.group_masks.items():
+            rate = (self.spikes * mask).sum().item() / self.group_counts[name]
+            self.group_activity_ema[name] = (
+                self.group_activity_ema[name] * self.activity_ema_decay + rate * (1 - self.activity_ema_decay)
             )
         self._update_motor()
         return self.spikes

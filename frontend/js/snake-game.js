@@ -109,6 +109,22 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
     return dir;
   }
 
+  // Phase 3.2b: both angles are allocentric (measured against the same
+  // fixed grid axis), not relative to each other — the backend's real EPG
+  // (heading) and FC (goal) neurons each get their own real ring/column
+  // injection, and the actual PFL synapses in the connectome compute the
+  // heading-vs-goal comparison, the way the real circuit does. Phase 3.1
+  // pre-computed a relative bearing in JS and only ever fed the brain "half"
+  // of that comparison (goal, no heading) — see docs/architecture-plan.md.
+  function getHeadingAngle() {
+    return Math.atan2(dir[1], dir[0]);
+  }
+
+  function getGoalAngle() {
+    const head = snake[0];
+    return Math.atan2(apple.y - head.y, apple.x - head.x);
+  }
+
   reset();
-  return { canvas, update, getDirection, applyTurn };
+  return { canvas, update, getDirection, applyTurn, getHeadingAngle, getGoalAngle };
 }
