@@ -370,6 +370,115 @@ stationary apple, only movement (mostly the snake's own body/head). Play
 looks like real-neural-activity-driven reactive turning, not
 intentional food-seeking — the honest result of this design, not a bug.
 
+**Phase 3.2 — Goal-directed spatial memory: FC→PFL3→DNa02, with the
+original 2D decision panel back underneath the 3D brain view (done,
+mixed result, reported honestly).** User's explicit requirement:
+increase apple-eating success using genuinely emergent brain activity —
+no scripted/external control pretending to be the brain (rejected
+outright, having confirmed firsthand that at least one well-known
+online "fly plays a game" demo is a scripted autopilot behind a
+decorative brain panel).
+
+*First attempt (in this phase) and why it failed*: injected the apple's
+egocentric bearing into FC (fan-shaped-body columnar neurons; real
+goal-representation cell type, column position parsed from real
+`_C{1-9}_` instance labels — `backend/scripts/prepare_subset.py`), read
+out via all identified `DNa\d+` steering descending neurons (32
+neurons, 16 L / 16 R — chosen over DNa02 alone, too few to read a rate
+from, and over the full 1308-neuron DN aggregate Phase 3.1 used, which
+dilutes the signal with unrelated escape/flight/grooming/feeding DNs).
+This pathway is real and strong (checked against this dataset's
+connectome-weights table before building it: FC→PFL 1585 edges/16296
+weight; PFL→DNa02 specifically 28 edges at 17-51 weight each; all 24
+PFL3 neurons connect to DNa02). Multi-trial testing
+(`test_diag_repeat.py`, 6 independent `LifSimulation` instances) found
+a real bug first: FC and PFL share the "cx" homeostatic cluster, so
+injecting a goal bump into FC pushed the cx-cluster average far over
+`TARGET_RATE` and the resulting proportional inhibition crushed PFL's
+own activity to ~0 (measured: PFL fell from a baseline ~2e-4 to 1.4e-69
+spikes/neuron/step) — the stability mechanism from Phase 2 was silently
+strangling the exact relay Phase 3.2 needed. Fixed by giving FC, PFL,
+and (later) EPG their own independent homeostatic pools instead of
+sharing "cx"'s. After the fix, FC and PFL both responded strongly and
+reliably to injection — but the DNa* L/R difference still came out
+wrong-signed in 5 of 6 independent trials. Not noise-floor-sized this
+time (FC/PFL activity moved by 1-2 orders of magnitude), but
+unreliable in sign — a different, more interesting failure than
+Phase 3.1's.
+
+*Root cause identified*: real PFL3 neurons don't relay the goal signal
+on its own — they compare it against *current heading* (from the EPG
+compass ring) via their real anatomical dendrite geometry. Injecting
+only the goal gives PFL nothing to compare against, so no reliable
+lateral (L/R) signal should be expected from that alone. Checked
+`EPG->PFL` in the same connectome-weights table before building this:
+247 edges, weight 2756 — a real, substantial pathway, comparable in
+scale to `FC->PFL`.
+
+*Second attempt*: added `heading_ring` (EPG-only, real PB-glomerulus
+ring position, 50 neurons / 25 L / 25 R / glomeruli 1-9 — the same ring
+structure Phase 3.1 used, but restricted to the actual compass cell
+type EPG instead of "anything with a PB-glomerulus label", and used for
+*heading* injection rather than goal injection this time). Both signals
+are now injected in the same allocentric (world-fixed) reference frame
+— `snake-game.js`'s `getHeadingAngle()`/`getGoalAngle()` replaced the
+old egocentric `getGoalBearing()` — so PFL's real synaptic wiring
+computes the heading-vs-goal comparison itself, rather than the JS side
+pre-computing a relative bearing and only ever telling the brain half
+of that comparison. Testing (`test_comparator.py`, mirrored heading=0
+with apple at +pi/2 vs -pi/2, 8 trials each) showed a real directional
+trend (apple-right-of-heading case: 6/8 trials correctly negative
+DNa* L/R shift) but not a statistically solid one (Welch t≈1.2,
+short of significance at n=8); sweeping the injection scale 1x-8x
+(`test_comparator_scaled.py`) did not make the trend firm up or grow
+monotonically, which is evidence this is a real ceiling of the
+approach, not a tuning gap — most likely because the real PFL3
+comparator depends on precise synaptic *sign* (excitatory vs
+inhibitory) that this dataset's weight table doesn't carry (Phase 0
+limitation, noted since Phase 2), and a purely-excitatory approximation
+cannot reproduce a clean subtraction operation.
+
+*What actually matters — measured game-level effect*: since the
+neuron-level signal is weak-but-real rather than absent, and a weak
+bias sustained continuously over hundreds of real gameplay ticks can
+behave differently than one static 3-second lab measurement, ran full
+simulated gameplay episodes (`test_gameplay.py`, coupling `LifSimulation`
+to the same game rules as `snake-game.js`, 60 simulated seconds/episode)
+comparing the finished Phase 3.2 circuit against no goal information at
+all. First batch (n=10 each) looked promising: 2/10 episodes ate an
+apple with goal+heading vs. 0/10 without. Exactly the lesson from
+Phase 3.1 repeated itself, though: a second, larger batch (n=16 each,
+different seeds) reversed it — 1/16 (mean 0.0625 apples/episode) with
+the circuit vs. 2/16 (mean 0.125) without. Combined across both
+batches: 3/26 apples with the circuit vs. 2/26 without — differences
+of one or two apples on counts this small carry no statistical weight
+either way. **The honest conclusion is that this circuit does not
+measurably improve apple-eating success over having no goal
+information at all**, despite being real anatomy, correctly wired, and
+no longer sabotaged by the homeostasis bug found along the way.
+
+**Honest summary of Phase 3.2**: the FC→PFL→DNa02→heading-comparator
+circuit is real anatomy, correctly wired, and produces a measurable,
+correctly-directed *trend* at the neuron level in isolated tests — but
+that trend is too weak and unreliable to survive into an actual
+measured improvement in gameplay success. The most likely fix (real
+excitatory/inhibitory neurotransmitter sign per neuron, which MaleCNS
+does publish separately from what Phase 0 pulled in — a purely
+excitatory network structurally cannot compute a clean subtraction,
+which is what the real PFL3 comparator needs) is a real avenue for a
+future phase, not attempted here. What shipped and is worth keeping
+regardless of the success-rate result: the fix for a genuine bug (FC's
+own homeostasis was crushing PFL, unrelated to whether the circuit
+would ultimately work), a completed (not half-built) biological
+comparator circuit for any future attempt to build on, and the
+restored 2D decision panel (`frontend/js/decision-panel.js`) showing
+this real pipeline — Motion → Goal (FC) → Compare (PFL) → Steer (DNa,
+split L/R) → Turn — driven by the same real `group_activity_ema` rates
+the backend actually computes, not a decorative animation. Apple-eating
+success in this project remains low; that is reported here plainly
+rather than dressed up, matching how every other measurement in this
+project has been handled.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
