@@ -79,11 +79,16 @@ MOTOR_EMA_TAU_MS = 150.0
 # a real negative result, not a tuning failure.
 #
 # fc_column (0-8) comes from real fan-shaped-body column labels in FC-type
-# instance strings (see prepare_subset.py) — 277 real neurons. The
-# readout uses all identified DNa* (numbered) steering descending neurons (32
-# neurons, 16 L / 16 R) rather than DNa02 alone (2 neurons, too few to read
-# a rate from in this uncalibrated LIF) or the full unrelated-DN-diluted
-# 1308-neuron aggregate.
+# instance strings (see prepare_subset.py) — 277 real neurons, column
+# number only. Briefly tried a side-aware 18-position version (matching the
+# heading ring below) on the theory that FC's side-blind code and EPG's
+# side-aware one were mismatched coordinate systems — reverted after
+# checking real connectivity: FC_L and FC_R project to PFL_L/PFL_R almost
+# identically, so side isn't a meaningful axis for FC (see prepare_subset.py
+# for the actual weight comparison). The readout uses all identified DNa*
+# (numbered) steering descending neurons (32 neurons, 16 L / 16 R) rather
+# than DNa02 alone (2 neurons, too few to read a rate from in this
+# uncalibrated LIF) or the full unrelated-DN-diluted 1308-neuron aggregate.
 FC_COLUMNS = 9
 GOAL_SCALE = 1.0
 GOAL_SIGMA = 1.5  # bump width in FC columns
@@ -105,9 +110,21 @@ STEERING_DN_TYPE_PATTERN = re.compile(r"^DNa\d+$")
 # letting PFL's real synaptic wiring compute the comparison itself, the way
 # it does in the actual fly, rather than pre-computing a relative bearing in
 # JS and only ever telling the brain "half" of the comparison.
-HEADING_RING_SIZE = 18
+# The PB's 18 glomeruli (9 per side) are a real, well-documented
+# "double-wrapped" ring (Wolff & Rubin; Turner-Evans et al.): the same 9
+# angular positions appear once per hemisphere, both halves jointly
+# representing one shared heading, not 18 independent positions — checked
+# directly against this dataset: EPG_L#k projects to EPG_R#k (matching
+# glomerulus number) at ~8x the average weight of EPG_L#k to a
+# different-numbered EPG_R#k2. So this also folds side away, matching
+# FC_COLUMNS' 9-position space, injecting into both hemispheres' matching
+# glomerulus together for one coherent bump — not the disconnected 18-slot
+# ring briefly used earlier in Phase 3.3 (the same mismatched-topology
+# mistake FC's side-aware draft made: placing two neurons that jointly
+# encode the *same* angular value ~9 slots apart on an artificial ring).
+HEADING_RING_SIZE = 9
 HEADING_SCALE = 1.0
-HEADING_SIGMA = 3.0  # bump width in ring positions (double GOAL_SIGMA: ring is 2x FC_COLUMNS)
+HEADING_SIGMA = 1.5  # bump width in ring positions (matches GOAL_SIGMA: same-sized 9-position ring)
 
 # Set from direct multi-trial measurement against this specific readout
 # population (see the standalone test run before committing this), not
@@ -123,7 +140,19 @@ class LifSimulation:
         self.n = int(data["n_neurons"])
         edge_pre = torch.from_numpy(data["edge_pre"].astype(np.int64))
         edge_post = torch.from_numpy(data["edge_post"].astype(np.int64))
-        edge_weight = torch.from_numpy(data["edge_weight"].astype(np.float32)) * WEIGHT_SCALE
+        # Phase 3.3: real per-neuron neurotransmitter sign (see
+        # prepare_subset.py's INHIBITORY_NT / nt_sign — GABA/glutamate = -1,
+        # everything else = +1, standard fly-connectome convention). Sign is
+        # a property of the presynaptic neuron releasing the transmitter,
+        # not of the connection, so index nt_sign by edge_pre. Previously
+        # every edge here was positive regardless of real biology (Phase 0's
+        # limitation, noted since Phase 2) — checked directly against this
+        # subset before fixing it: Delta7 (real inhibitory ring-attractor-
+        # sharpening interneuron in the compass circuit) was 100% wrongly
+        # excitatory, and the central-complex cluster overall was ~32%
+        # wrongly-signed (994/3137 real GABA/glutamate neurons).
+        nt_sign = torch.from_numpy(data["nt_sign"].astype(np.float32))
+        edge_weight = torch.from_numpy(data["edge_weight"].astype(np.float32)) * WEIGHT_SCALE * nt_sign[edge_pre]
 
         indices = torch.stack([edge_post, edge_pre])
         self.weight_matrix = torch.sparse_coo_tensor(

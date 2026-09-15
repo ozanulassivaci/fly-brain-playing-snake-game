@@ -33,10 +33,16 @@ CORE_CX_ROI_PATTERN = re.compile(r"^(EB|FB|PB(\(|$)|NO$|NO\()")
 MIN_CX_SYNWEIGHT = 5
 # FC (fan-shaped body columnar, real goal-direction cell types) instance
 # strings look like "FC1E_C4_L" — the "_C{1-9}_" is real fan-shaped-body
-# column position, matching the real anatomical column count. Used for
-# goal-direction injection (Phase 3.2) — see docs/architecture-plan.md for
-# why this replaced Phase 3.1's generic PB-glomerulus ring (wrong anatomical
-# target: that ring represents current heading, not goal).
+# column position, matching the real anatomical column count, and the
+# trailing "_L"/"_R" is a real hemisphere side (all 277 FC neurons in this
+# subset have it, 139 R / 138 L). Briefly made this side-aware (an 18-slot
+# code duplicating the heading ring's structure) on the theory that a
+# side-blind FC code and a side-aware EPG code were mismatched coordinate
+# systems for PFL to compare — reverted after checking the real
+# connectivity: FC_L and FC_R project to PFL_L/PFL_R almost identically
+# (e.g. FC_L->PFL_L 4199 vs FC_L->PFL_R 3859, both sides similar), unlike
+# EPG (see below), so side isn't a meaningful axis for FC's positional
+# code. Column number only, 9 positions, matching the original design.
 FC_COLUMN_PATTERN = re.compile(r"_C(\d)_")
 
 # EPG ("E-PG", the actual identified compass/heading cell type) instance
@@ -49,7 +55,40 @@ FC_COLUMN_PATTERN = re.compile(r"_C(\d)_")
 # separate FC goal ring above — PFL neurons receive real synapses from both
 # (FC->PFL: 1585 edges; EPG->PFL: 247 edges) and are the ones anatomically
 # wired to compare them.
-HEADING_RING_PATTERN = re.compile(r"\(PB\d+\)_([LR])(\d)")
+#
+# The PB's 18 glomeruli (9 per side) are the real, well-documented
+# "double-wrapped" compass ring in Drosophila literature (Wolff & Rubin,
+# Turner-Evans et al.): the same 9 angular positions appear once per
+# hemisphere, both halves representing one shared heading (not 18
+# independent positions) — checked directly against this dataset before
+# relying on it: EPG_L#k projects to EPG_R#k (matching glomerulus number)
+# with ~8x the average weight of EPG_L#k to a *different*-numbered EPG_R#k2,
+# consistent with paired glomeruli encoding the same angular value rather
+# than 18 distinct ones. So heading_ring_for below folds side away too —
+# same 9-position space as FC's column code, injecting into both
+# hemispheres' matching glomerulus together for one coherent bump — instead
+# of the disconnected 18-slot ring used up through Phase 3.3's first draft
+# (which is the same mismatched-topology mistake FC's side-aware draft
+# made: placing two neurons that jointly encode the *same* angular value
+# on opposite sides of an artificial ring, roughly 9 slots apart).
+HEADING_RING_PATTERN = re.compile(r"\(PB\d+\)_[LR](\d)")
+
+# Phase 3.3: real per-neuron neurotransmitter predictions exist in this
+# dataset (Neuprint_Neurons.feather's consensusNt, from FlyEM's own EM-based
+# NT classifier) — checked directly against this exact subset before using
+# it: Delta7 (the real, well-known inhibitory ring-attractor-sharpening
+# interneuron in the fly compass circuit) is 100% glutamate in this data
+# (42/42 neurons), and the central-complex cluster overall is ~32% GABA or
+# glutamate (994/3137) — not the "no sign data available" situation
+# docs/architecture-plan.md previously assumed. Standard fly-connectome
+# convention (matching how FlyWire/hemibrain analyses treat these three
+# transmitters): acetylcholine is excitatory, GABA and glutamate are
+# inhibitory. Everything else here (dopamine/octopamine/serotonin/unclear/
+# missing — a small remainder, see the per-cluster breakdown recorded in
+# docs/architecture-plan.md) defaults to excitatory rather than being
+# modeled as a separate neuromodulatory channel, which is out of scope for
+# this project's simplified LIF.
+INHIBITORY_NT = {"gaba", "glutamate"}
 
 
 def load_annotations() -> pd.DataFrame:
@@ -63,6 +102,20 @@ def load_roi_info() -> pd.DataFrame:
     # the full Neuprint_Neurons.feather (the only table with real roiInfo).
     df = pd.read_feather(DATA_RAW / "neurons_roi_subset.feather")
     return df[df["status"] == "Traced"].copy()
+
+
+def load_neurotransmitters() -> pd.DataFrame:
+    # The full Neuprint_Neurons.feather again (same file load_roi_info's
+    # neurons_roi_subset.feather was pre-projected from), a different
+    # column pair this time — consensusNt isn't in that smaller projection,
+    # so this reads the big file directly, column-projected to keep it fast.
+    import pyarrow.feather as feather
+
+    table = feather.read_table(
+        DATA_RAW / "Neuprint_Neurons.feather", columns=["bodyId:long", "consensusNt:string"]
+    )
+    df = table.to_pandas().rename(columns={"bodyId:long": "bodyId", "consensusNt:string": "consensusNt"})
+    return df
 
 
 def has_core_cx_roi(roi_info_json: str) -> bool:
@@ -81,6 +134,7 @@ def has_core_cx_roi(roi_info_json: str) -> bool:
 def build_subset() -> pd.DataFrame:
     traced = load_annotations()
     roi_df = load_roi_info()[["bodyId", "roiInfo"]]
+    nt_df = load_neurotransmitters()
 
     motion_types = {t for t in traced["type"].dropna().unique() if MOTION_PATTERN.match(str(t))}
     motion_mask = traced["type"].isin(motion_types)
@@ -100,6 +154,7 @@ def build_subset() -> pd.DataFrame:
 
     subset = traced[motion_mask | cx_mask | dn_mask].copy()
     subset["cluster"] = subset.apply(cluster_for, axis=1)
+    subset = subset.merge(nt_df, on="bodyId", how="left")
     subset = subset[subset["somaLocation"].notna()].reset_index(drop=True)
     subset["subset_index"] = subset.index
     return subset
@@ -149,13 +204,11 @@ def write_backend_edges(subset: pd.DataFrame) -> None:
         if not str(row["type"]).startswith("EPG"):
             return -1
         m = HEADING_RING_PATTERN.search(str(row["instance"]))
-        if not m:
-            return -1
-        side, num = m.group(1), int(m.group(2))
-        return (num - 1) + (9 if side == "L" else 0)
+        return int(m.group(1)) - 1 if m else -1
 
     fc_column = subset.apply(fc_column_for, axis=1).to_numpy(dtype=np.int32)
     heading_ring = subset.apply(heading_ring_for, axis=1).to_numpy(dtype=np.int32)
+    nt_sign = np.where(subset["consensusNt"].isin(INHIBITORY_NT), -1.0, 1.0).astype(np.float32)
 
     DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
     out_path = DATA_PROCESSED / "subset.npz"
@@ -169,9 +222,11 @@ def write_backend_edges(subset: pd.DataFrame) -> None:
         soma_side=soma_side,
         fc_column=fc_column,
         heading_ring=heading_ring,
+        nt_sign=nt_sign,
         n_neurons=len(subset),
     )
     print(f"wrote {out_path} ({len(subset)} neurons, {len(edge_pre)} internal edges)")
+    print(f"  inhibitory (GABA/glutamate) neurons: {int((nt_sign < 0).sum())} / {len(subset)}")
     print(f"  FC goal-column neurons (valid fc_column): {int((fc_column >= 0).sum())}")
     print(f"  EPG heading-ring neurons (valid heading_ring): {int((heading_ring >= 0).sum())}")
 
