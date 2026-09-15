@@ -2,24 +2,25 @@ import * as THREE from 'three';
 
 // Real MaleCNS v1.0 soma positions (Phase 0 data, see docs/architecture-plan.md)
 // for the candidate functional subset — motion pathway / central complex /
-// descending neurons — rendered as a glowing point cloud. The STRUCTURE here
-// is real; the pulsing on game events is decorative, not simulated activity
-// (that's Phase 2/3). See frontend/assets/brain-subset.json.
+// descending neurons — rendered as a glowing point cloud. Point order in
+// frontend/assets/brain-subset.json is the same canonical neuron index the
+// backend LIF simulation uses (backend/scripts/prepare_subset.py generates
+// both together), so a spike index from the WebSocket maps directly onto a
+// point here. If the backend isn't running, the panel just shows the real
+// structure with no activity — it degrades gracefully, doesn't fail.
 
 const CLUSTER_COLORS = {
-  motion: 0x50b4ff,
-  cx: 0xffc850,
-  dn: 0xff6482,
+  motion: [0.31, 0.71, 1.0],
+  cx: [1.0, 0.78, 0.31],
+  dn: [1.0, 0.39, 0.51],
 };
 
 const BASE_SIZE = { motion: 0.016, cx: 0.045, dn: 0.055 };
 const BASE_OPACITY = { motion: 0.4, cx: 0.6, dn: 0.65 };
+const DIM_FACTOR = 0.35;
+const FLASH_DECAY = 0.9; // multiplicative color decay per render frame
 
-const PULSE_TARGETS = {
-  move: ['motion'],
-  eat: ['cx', 'dn'],
-  collide: ['dn'],
-};
+const WS_URL = 'ws://localhost:8765/ws';
 
 function makeGlowTexture() {
   const size = 64;
@@ -38,7 +39,9 @@ function makeGlowTexture() {
 export async function createBrainViz(canvas) {
   const data = await fetch('./assets/brain-subset.json').then((r) => r.json());
   const byCluster = { motion: [], cx: [], dn: [] };
-  for (const p of data.points) byCluster[p.c]?.push(p);
+  data.points.forEach((p, globalIndex) => {
+    byCluster[p.c]?.push({ ...p, globalIndex });
+  });
 
   const width = canvas.width,
     height = canvas.height;
@@ -52,46 +55,97 @@ export async function createBrainViz(canvas) {
 
   const glowTexture = makeGlowTexture();
   const clusters = {};
+  const indexLookup = new Map(); // globalIndex -> { cluster, local }
+
   for (const key of Object.keys(byCluster)) {
     const pts = byCluster[key];
+    const [r, g, b] = CLUSTER_COLORS[key];
+    const dim = [r * DIM_FACTOR, g * DIM_FACTOR, b * DIM_FACTOR];
     const positions = new Float32Array(pts.length * 3);
+    const colors = new Float32Array(pts.length * 3);
     pts.forEach((p, i) => {
       positions[i * 3] = p.x;
       positions[i * 3 + 1] = p.y;
       positions[i * 3 + 2] = p.z;
+      colors[i * 3] = dim[0];
+      colors[i * 3 + 1] = dim[1];
+      colors[i * 3 + 2] = dim[2];
+      indexLookup.set(p.globalIndex, { cluster: key, local: i });
     });
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const colorAttr = new THREE.BufferAttribute(colors, 3);
+    colorAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('color', colorAttr);
     const material = new THREE.PointsMaterial({
-      color: CLUSTER_COLORS[key],
       size: BASE_SIZE[key],
       map: glowTexture,
+      vertexColors: true,
       transparent: true,
       opacity: BASE_OPACITY[key],
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       sizeAttenuation: true,
     });
-    const points = new THREE.Points(geometry, material);
-    scene.add(points);
-    clusters[key] = { material, pulse: 0 };
+    scene.add(new THREE.Points(geometry, material));
+    clusters[key] = { colorAttr, dim, bright: [r, g, b] };
+  }
+
+  function flashGlobalIndex(globalIndex) {
+    const loc = indexLookup.get(globalIndex);
+    if (!loc) return;
+    const { colorAttr, bright } = clusters[loc.cluster];
+    const arr = colorAttr.array;
+    arr[loc.local * 3] = bright[0];
+    arr[loc.local * 3 + 1] = bright[1];
+    arr[loc.local * 3 + 2] = bright[2];
+    colorAttr.needsUpdate = true;
+  }
+
+  let ws = null;
+  try {
+    ws = new WebSocket(WS_URL);
+    ws.addEventListener('message', (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (msg.type === 'spikes') {
+        for (const idx of msg.indices) flashGlobalIndex(idx);
+      }
+    });
+    ws.addEventListener('error', () => {
+      console.warn('brain-viz: backend WebSocket unavailable, showing static structure only');
+    });
+  } catch (err) {
+    console.warn('brain-viz: could not open WebSocket', err);
   }
 
   function pulse(kind) {
-    const targets = PULSE_TARGETS[kind];
-    if (!targets) return;
-    targets.forEach((key) => {
-      if (clusters[key]) clusters[key].pulse = 1;
-    });
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'event', kind }));
+    }
   }
 
   function render(nowSec) {
     scene.rotation.y = nowSec * 0.15;
     for (const key of Object.keys(clusters)) {
-      const c = clusters[key];
-      c.pulse = Math.max(0, c.pulse - 0.02);
-      c.material.size = BASE_SIZE[key] * (1 + c.pulse * 1.8);
-      c.material.opacity = Math.min(1, BASE_OPACITY[key] + c.pulse * 0.5);
+      const { colorAttr, dim } = clusters[key];
+      const arr = colorAttr.array;
+      let changed = false;
+      for (let i = 0; i < arr.length; i += 3) {
+        for (let c = 0; c < 3; c++) {
+          const target = dim[c];
+          const cur = arr[i + c];
+          if (cur > target + 0.001) {
+            arr[i + c] = target + (cur - target) * FLASH_DECAY;
+            changed = true;
+          }
+        }
+      }
+      if (changed) colorAttr.needsUpdate = true;
     }
     renderer.render(scene, camera);
   }

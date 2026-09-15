@@ -1,0 +1,11 @@
+# Install torch separately first, matching your CUDA setup, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+# (check https://pytorch.org/get-started/locally/ for the right index URL
+# for your driver/CUDA version; `nvidia-smi` shows the driver's max
+# supported CUDA version). Then install the rest:
+#   pip install -r backend/requirements.txt
+fastapi==0.141.1
+uvicorn[standard]==0.40.0
+pandas==2.3.3
+pyarrow==25.0.1
+numpy==2.2.6
