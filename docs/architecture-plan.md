@@ -279,11 +279,58 @@ leg's pose at trigger time rather than the live gait angle, since the
 0.7 Hz walking cycle was otherwise fighting the reach and making it
 look jittery.
 
-**Phase 2 — Real connectome visualization.** Python/CUDA backend
-simulates the real MaleCNS functional subset (LIF), streams spikes over
-WebSocket. Brain panel renders real activity on the full-connectome
-structure. Game is still scripted/human-controlled — the brain sim is an
-observer, not yet a driver.
+**Phase 2 — Real connectome simulation (done).** `backend/` runs a real
+LIF (leaky integrate-and-fire) simulation of the Phase 0 candidate
+subset on the local RTX 4070 (PyTorch/CUDA), streaming spikes to the
+browser over a FastAPI WebSocket (`backend/server.py`, `backend/lif.py`).
+`backend/scripts/prepare_subset.py` is now the single reproducible
+source for both the frontend's `brain-subset.json` and the backend's
+`data/processed/subset.npz` — they must share the same neuron index
+order, which the earlier ad hoc script didn't guarantee. `brain-viz.js`
+renders real per-neuron activity (per-point vertex colors, flash-and-
+decay) instead of the old decorative per-cluster pulse; it still
+degrades gracefully to a static structure if the backend isn't running.
+
+Per the user's choice, the simulation isn't purely spontaneous — Snake's
+move/eat/collide events are sent to the backend over the same WebSocket
+and inject extra current into the matching neuron cluster — a small,
+contained step toward Phase 3, not the closed loop itself (Snake is
+still human-controlled; the brain sim doesn't drive gameplay).
+
+Real, load-bearing caveat found while tuning this: the weight table has
+no excitatory/inhibitory sign (we didn't pull neurotransmitter-type
+data in Phase 0), so every connection in this subset is positive. A
+purely excitatory recurrent network at this connectivity density
+saturates almost immediately — every tested weight/noise combination
+without correction drove 15-85% of the whole network to spike every
+20ms. Added a simple population-level homeostatic control loop
+(proportional negative feedback toward a target firing rate,
+`TARGET_RATE`/`INHIB_GAIN` in `backend/lif.py`) standing in for the
+real inhibitory neurons this subset doesn't model — documented as an
+approximate stabilizer, not a biologically derived mechanism. All of
+`WEIGHT_SCALE`, `NOISE_STD`, `TARGET_RATE`, etc. are empirically-tuned
+knobs for a visually plausible sparse firing rate, not calibrated
+parameters.
+
+Also found mid-implementation: rendering ~18k+ points per cluster with
+additive blending saturates to solid white well before any real
+activity is involved, purely from point density — this had nothing to
+do with Phase 2's new activity data (confirmed by testing with the
+backend off). Fixed by further lowering per-cluster point size/opacity/
+base-color-dimness (`BASE_SIZE`/`BASE_OPACITY`/`DIM_FACTOR` in
+`brain-viz.js`) — worth remembering before adding more points later.
+
+Testing note: headless-Chrome's `--virtual-time-budget` (used for every
+prior phase's screenshot testing) hangs/spins indefinitely once the
+page holds an open WebSocket — the virtual clock never reaches network
+idle. Real-time testing against a live WebSocket needs a plain
+`--remote-debugging-port` + a real `sleep` + a CDP
+`Page.captureScreenshot` call instead.
+
+**Phase 3 — Closed loop.** Snake screen → simplified retina reduction →
+visual neurons → LIF sim → descending neurons → IK targets → joystick/
+button animation → real key input. MuJoCo contact physics replaces the
+Phase 1 scripted animation here.
 
 **Phase 3 — Closed loop.** Snake screen → simplified retina reduction →
 visual neurons → LIF sim → descending neurons → IK targets → joystick/

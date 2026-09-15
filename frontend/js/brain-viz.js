@@ -15,10 +15,10 @@ const CLUSTER_COLORS = {
   dn: [1.0, 0.39, 0.51],
 };
 
-const BASE_SIZE = { motion: 0.016, cx: 0.045, dn: 0.055 };
-const BASE_OPACITY = { motion: 0.4, cx: 0.6, dn: 0.65 };
-const DIM_FACTOR = 0.35;
-const FLASH_DECAY = 0.9; // multiplicative color decay per render frame
+const BASE_SIZE = { motion: 0.01, cx: 0.03, dn: 0.04 };
+const BASE_OPACITY = { motion: 0.25, cx: 0.4, dn: 0.45 };
+const DIM_FACTOR = 0.12;
+const FLASH_DECAY = 0.82; // multiplicative color decay per render frame
 
 const WS_URL = 'ws://localhost:8765/ws';
 
