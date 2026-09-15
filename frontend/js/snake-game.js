@@ -1,20 +1,25 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
-
-// Brain-controlled only (Phase 3) — no keyboard input. applyTurn() is called
-// continuously (every backend broadcast, ~50Hz) with the LIF sim's current
-// decoded decision. The backend's own hysteresis (see backend/lif.py's
-// _update_motor) holds a "left"/"right" state for a while once triggered
-// (measured: anywhere from ~10 to ~200+ broadcasts, i.e. up to several real
-// seconds) rather than flipping every broadcast — that's intentional
-// debouncing on the backend side. But applying a 90-degree turn on *every*
-// game tick for as long as that state holds compounds into many repeated
-// turns during a single hold period, which is exactly why the snake was
-// spinning in tight circles: a single sustained "right" decision was being
-// re-applied on every one of the ~10-30 game ticks it spanned. Turning must
-// be edge-triggered instead — one 90-degree turn per straight->left or
-// straight->right *transition* in the decoded decision, not one per tick
-// spent in that state.
+// Minimum game ticks between two executed turns. The backend's own
+// hysteresis (see backend/lif.py's _update_motor) holds a "left"/"right"
+// decision for a while once triggered (measured: anywhere from ~10 to
+// ~200+ broadcasts, i.e. up to several real seconds) rather than flipping
+// every broadcast. Turning once per *tick* the decision holds spins the
+// snake in tight circles (measured and fixed); turning only once per
+// straight->left/right *transition* and then going straight until the next
+// one was tried next and made the snake travel straight for long stretches,
+// often into a wall, before the next transition ever came (this project's
+// 20x20 grid is smaller than a multi-second hold period at
+// TICK_SECONDS=0.15). This cooldown re-executes a turn every
+// MIN_TURN_TICKS ticks for as long as the decision holds, instead of never
+// again (too rare) or every tick (spins) — a reasonable middle ground for
+// avoiding both known-bad extremes, not a value with a measured effect on
+// apple-eating success: repeated multi-trial testing (see
+// docs/architecture-plan.md's Phase 3.3 section) found no configuration of
+// this project's circuit, cadence included, that reliably beat having no
+// goal information at all — results replicated in the opposite direction
+// as often as not.
+const MIN_TURN_TICKS = 2;
 function rotateLeft([dx, dy]) {
   return [dy, -dx];
 }
@@ -28,7 +33,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, lastMotorTurn, pendingTurnEdge, apple, alive, tickAcc, restartAcc;
+  let snake, dir, pendingMotorTurn, ticksSinceTurn, apple, alive, tickAcc, restartAcc;
 
   function reset() {
     snake = [
@@ -37,8 +42,8 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
       { x: Math.floor(cols / 2) - 2, y: Math.floor(rows / 2) },
     ];
     dir = [1, 0];
-    lastMotorTurn = 'straight';
-    pendingTurnEdge = null;
+    pendingMotorTurn = null;
+    ticksSinceTurn = MIN_TURN_TICKS;
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
@@ -52,16 +57,15 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   }
 
   function applyTurn(turn) {
-    if (turn !== 'straight' && turn !== lastMotorTurn) {
-      pendingTurnEdge = turn;
-    }
-    lastMotorTurn = turn;
+    pendingMotorTurn = turn !== 'straight' ? turn : null;
   }
 
   function step() {
-    if (pendingTurnEdge === 'left') dir = rotateLeft(dir);
-    else if (pendingTurnEdge === 'right') dir = rotateRight(dir);
-    pendingTurnEdge = null;
+    ticksSinceTurn++;
+    if (pendingMotorTurn && ticksSinceTurn >= MIN_TURN_TICKS) {
+      dir = pendingMotorTurn === 'left' ? rotateLeft(dir) : rotateRight(dir);
+      ticksSinceTurn = 0;
+    }
     const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
 
     const hitWall = head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows;
