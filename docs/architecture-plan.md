@@ -589,6 +589,52 @@ genuinely reliable fix would likely require calibrating the network
 against real physiological firing-rate/response data rather than
 tuning constants by hand, which is out of scope here.
 
+**Phase 3.3 follow-up — the circling bug was still visible after the
+cooldown mitigation (done).** Direct testing after the above showed the
+snake still circling. The `MIN_TURN_TICKS` cooldown reduced turn
+frequency but didn't fix the actual cause: the motor hysteresis band
+(`TURN_ON_THRESH` vs. a much smaller `TURN_OFF_THRESH`) held a
+left/right decision for a long time once triggered (median ~5.3 game
+ticks, tail to ~41 ticks / ~6 real seconds) — even a 2-tick cooldown
+still re-executes ~15+ turns during a hold that long, which looks like
+continuous spinning on a grid regardless of the exact interval. Fixed
+at the source instead of working around it in the game layer:
+`TURN_OFF_THRESH` now equals `TURN_ON_THRESH` (no hysteresis band),
+measured to shrink hold length to a median of ~1.6 ticks / max ~6.8
+ticks — short enough that `snake-game.js` went back to the simplest
+possible mapping (plain once-per-tick turning, no cooldown or
+edge-trigger workaround needed). Verified this actually worked, not
+just in theory, via a death-cause breakdown across 24 episodes:
+self-collision (circling into the snake's own body — what "circling"
+actually kills you with) dropped to 2/24, down from being the dominant
+failure mode; wall collision is now the overwhelming majority cause of
+death (21/24), a separate, still-open problem — the snake survives a
+reasonable while (median ~95 ticks, ~14 real seconds) without spinning
+into itself, but still has no reliable way to see a wall coming in
+time to avoid it, consistent with everything already measured about
+the weak/unreliable steering signal. Apple count remained low and
+comparable with/without goal information (3 vs. 4 across 24 episodes)
+even with circling fixed — the steering signal's reliability, not the
+turn-execution mechanism, remains the actual bottleneck.
+
+**On the user's suggestion to add DOOM/parking-demo-style guidance,
+answered directly and not implemented (open question for a future
+phase):** explicitly declined to add a scripted/external algorithm that
+computes the correct move and overrides or fakes the brain's decision —
+that would violate this project's foundational, repeatedly-reaffirmed
+constraint (no external algorithm playing the game behind a decorative
+brain panel, confirmed as exactly what at least one real "fly plays a
+game" demo online actually does). The one remaining lever consistent
+with "genuinely emergent, not scripted" that hasn't been tried: real
+synaptic plasticity (a Hebbian/reward-modulated weight-update rule that
+strengthens the pathway active just before eating an apple and weakens
+the one active just before a collision) — this would still be the
+network's own real connectome-derived structure adapting through real
+experience, not a fake path-following algorithm, but is a substantial
+new mechanism (online learning across repeated episodes) not yet
+designed or attempted, and is a reasonable candidate for a Phase 4 if
+this project continues.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
