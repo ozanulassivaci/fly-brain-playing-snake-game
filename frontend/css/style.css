@@ -41,6 +41,12 @@ body {
   border-radius: 4px;
 }
 
+#decision-canvas {
+  border: 1px solid #232838;
+  border-radius: 4px;
+  margin-top: 10px;
+}
+
 #hint {
   margin-top: 10px;
   font-size: 12px;

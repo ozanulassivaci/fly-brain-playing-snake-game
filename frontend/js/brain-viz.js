@@ -36,7 +36,7 @@ function makeGlowTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
-export async function createBrainViz(canvas, { onMotor } = {}) {
+export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
   const data = await fetch('./assets/brain-subset.json').then((r) => r.json());
   const byCluster = { motion: [], cx: [], dn: [] };
   data.points.forEach((p, globalIndex) => {
@@ -115,6 +115,7 @@ export async function createBrainViz(canvas, { onMotor } = {}) {
       if (msg.type === 'spikes') {
         for (const idx of msg.indices) flashGlobalIndex(idx);
         if (msg.motor) onMotor?.(msg.motor.turn);
+        if (msg.groups) onGroups?.(msg.groups, msg.motor?.turn);
       }
     });
     ws.addEventListener('error', () => {

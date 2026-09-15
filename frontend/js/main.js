@@ -5,6 +5,7 @@ import { createFlyBody } from './fly-body.js';
 import { createCabinetScene } from './cabinet-scene.js';
 import { createSnakeGame } from './snake-game.js';
 import { createBrainViz } from './brain-viz.js';
+import { createDecisionPanel } from './decision-panel.js';
 import { createRetina } from './retina.js';
 
 const overlay = document.getElementById('overlay');
@@ -85,12 +86,17 @@ async function main() {
   flyWrapper.position.copy(targetPosition).sub(centerOffset);
 
   const brainCanvas = document.getElementById('brain-canvas');
+  const decisionCanvas = document.getElementById('decision-canvas');
+  const decisionPanel = createDecisionPanel(decisionCanvas);
   // Phase 3: the LIF sim's decoded left/right descending-neuron activity
   // drives the snake for real now (snake.applyTurn, wired below) — this
   // isn't a decorative sync anymore. `snake` is forward-declared since it
   // and brainViz's onMotor callback reference each other.
   let snake;
-  const brainViz = await createBrainViz(brainCanvas, { onMotor: (turn) => snake?.applyTurn(turn) });
+  const brainViz = await createBrainViz(brainCanvas, {
+    onMotor: (turn) => snake?.applyTurn(turn),
+    onGroups: (groups, turn) => decisionPanel.update(groups, turn),
+  });
   const retina = createRetina();
 
   snake = createSnakeGame({
@@ -135,7 +141,11 @@ async function main() {
     retinaAcc += dt;
     if (retinaAcc >= RETINA_SAMPLE_INTERVAL) {
       retinaAcc = 0;
-      brainViz.sendSensory(retina.sampleMotion(snake.canvas));
+      brainViz.sendSensory({
+        ...retina.sampleMotion(snake.canvas),
+        bearing: snake.getGoalAngle(),
+        heading: snake.getHeadingAngle(),
+      });
     }
 
     const dir = snake.getDirection();
@@ -152,6 +162,7 @@ async function main() {
     snake.update(dt);
     screenTexture.needsUpdate = true;
     brainViz.render(now);
+    decisionPanel.render();
 
     controls.update();
     renderer.render(scene, camera);

@@ -56,7 +56,14 @@ async def simulation_loop():
     while True:
         spiked = sim.step_batch(STEPS_PER_BROADCAST)
         if clients:
-            payload = json.dumps({"type": "spikes", "indices": spiked, "motor": {"turn": sim.read_motor()}})
+            payload = json.dumps(
+                {
+                    "type": "spikes",
+                    "indices": spiked,
+                    "motor": {"turn": sim.read_motor()},
+                    "groups": sim.read_groups(),
+                }
+            )
             dead = []
             for ws in clients:
                 try:
