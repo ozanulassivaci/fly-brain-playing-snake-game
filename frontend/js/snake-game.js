@@ -3,9 +3,18 @@ const RESTART_DELAY_SECONDS = 1.5;
 
 // Brain-controlled only (Phase 3) — no keyboard input. applyTurn() is called
 // continuously (every backend broadcast, ~50Hz) with the LIF sim's current
-// decoded decision; only the latest value at the moment of each game tick
-// actually rotates the snake, so a sustained "right" over several broadcasts
-// within one tick doesn't compound into multiple 90-degree turns.
+// decoded decision. The backend's own hysteresis (see backend/lif.py's
+// _update_motor) holds a "left"/"right" state for a while once triggered
+// (measured: anywhere from ~10 to ~200+ broadcasts, i.e. up to several real
+// seconds) rather than flipping every broadcast — that's intentional
+// debouncing on the backend side. But applying a 90-degree turn on *every*
+// game tick for as long as that state holds compounds into many repeated
+// turns during a single hold period, which is exactly why the snake was
+// spinning in tight circles: a single sustained "right" decision was being
+// re-applied on every one of the ~10-30 game ticks it spanned. Turning must
+// be edge-triggered instead — one 90-degree turn per straight->left or
+// straight->right *transition* in the decoded decision, not one per tick
+// spent in that state.
 function rotateLeft([dx, dy]) {
   return [dy, -dx];
 }
@@ -19,7 +28,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, pendingTurn, apple, alive, tickAcc, restartAcc;
+  let snake, dir, lastMotorTurn, pendingTurnEdge, apple, alive, tickAcc, restartAcc;
 
   function reset() {
     snake = [
@@ -28,7 +37,8 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
       { x: Math.floor(cols / 2) - 2, y: Math.floor(rows / 2) },
     ];
     dir = [1, 0];
-    pendingTurn = 'straight';
+    lastMotorTurn = 'straight';
+    pendingTurnEdge = null;
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
@@ -42,12 +52,16 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   }
 
   function applyTurn(turn) {
-    pendingTurn = turn;
+    if (turn !== 'straight' && turn !== lastMotorTurn) {
+      pendingTurnEdge = turn;
+    }
+    lastMotorTurn = turn;
   }
 
   function step() {
-    if (pendingTurn === 'left') dir = rotateLeft(dir);
-    else if (pendingTurn === 'right') dir = rotateRight(dir);
+    if (pendingTurnEdge === 'left') dir = rotateLeft(dir);
+    else if (pendingTurnEdge === 'right') dir = rotateRight(dir);
+    pendingTurnEdge = null;
     const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
 
     const hitWall = head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows;
