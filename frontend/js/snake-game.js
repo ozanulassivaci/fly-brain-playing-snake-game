@@ -1,16 +1,17 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
 
-const DIRECTIONS = {
-  ArrowUp: [0, -1],
-  ArrowDown: [0, 1],
-  ArrowLeft: [-1, 0],
-  ArrowRight: [1, 0],
-  w: [0, -1],
-  s: [0, 1],
-  a: [-1, 0],
-  d: [1, 0],
-};
+// Brain-controlled only (Phase 3) — no keyboard input. applyTurn() is called
+// continuously (every backend broadcast, ~50Hz) with the LIF sim's current
+// decoded decision; only the latest value at the moment of each game tick
+// actually rotates the snake, so a sustained "right" over several broadcasts
+// within one tick doesn't compound into multiple 90-degree turns.
+function rotateLeft([dx, dy]) {
+  return [dy, -dx];
+}
+function rotateRight([dx, dy]) {
+  return [-dy, dx];
+}
 
 export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, onEat, onCollide } = {}) {
   const canvas = document.createElement('canvas');
@@ -18,7 +19,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, nextDir, apple, alive, tickAcc, restartAcc;
+  let snake, dir, pendingTurn, apple, alive, tickAcc, restartAcc;
 
   function reset() {
     snake = [
@@ -27,7 +28,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
       { x: Math.floor(cols / 2) - 2, y: Math.floor(rows / 2) },
     ];
     dir = [1, 0];
-    nextDir = [1, 0];
+    pendingTurn = 'straight';
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
@@ -40,15 +41,13 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
     } while (snake.some((s) => s.x === apple.x && s.y === apple.y));
   }
 
-  window.addEventListener('keydown', (e) => {
-    const d = DIRECTIONS[e.key];
-    if (!d) return;
-    if (d[0] === -dir[0] && d[1] === -dir[1]) return; // no reversing into self
-    nextDir = d;
-  });
+  function applyTurn(turn) {
+    pendingTurn = turn;
+  }
 
   function step() {
-    dir = nextDir;
+    if (pendingTurn === 'left') dir = rotateLeft(dir);
+    else if (pendingTurn === 'right') dir = rotateRight(dir);
     const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
 
     const hitWall = head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows;
@@ -111,5 +110,5 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   }
 
   reset();
-  return { canvas, update, getDirection };
+  return { canvas, update, getDirection, applyTurn };
 }

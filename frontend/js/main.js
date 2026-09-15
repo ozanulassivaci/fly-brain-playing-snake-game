@@ -5,6 +5,7 @@ import { createFlyBody } from './fly-body.js';
 import { createCabinetScene } from './cabinet-scene.js';
 import { createSnakeGame } from './snake-game.js';
 import { createBrainViz } from './brain-viz.js';
+import { createRetina } from './retina.js';
 
 const overlay = document.getElementById('overlay');
 const viewport = document.getElementById('viewport');
@@ -84,9 +85,15 @@ async function main() {
   flyWrapper.position.copy(targetPosition).sub(centerOffset);
 
   const brainCanvas = document.getElementById('brain-canvas');
-  const brainViz = await createBrainViz(brainCanvas);
+  // Phase 3: the LIF sim's decoded left/right descending-neuron activity
+  // drives the snake for real now (snake.applyTurn, wired below) — this
+  // isn't a decorative sync anymore. `snake` is forward-declared since it
+  // and brainViz's onMotor callback reference each other.
+  let snake;
+  const brainViz = await createBrainViz(brainCanvas, { onMotor: (turn) => snake?.applyTurn(turn) });
+  const retina = createRetina();
 
-  const snake = createSnakeGame({
+  snake = createSnakeGame({
     onMove: () => brainViz.pulse('move'),
     onEat: () => brainViz.pulse('eat'),
     onCollide: () => brainViz.pulse('collide'),
@@ -97,10 +104,11 @@ async function main() {
 
   overlay.classList.add('hidden');
 
-  // On every snake direction change: tilt the joystick that way and have the
-  // front-left leg reach toward it for a moment (see fly-body.js's
-  // solveReach). Purely cosmetic sync with the game, not a real control loop
-  // (that's Phase 3) — but real IK against the real skeleton, not a canned pose.
+  // On every snake direction change (now driven by the LIF sim's decoded
+  // motor decision, not keyboard input): tilt the joystick that way and have
+  // the front-right leg reach toward it for a moment (see fly-body.js's
+  // solveReach) — real IK against the real skeleton, following a direction
+  // change that itself came from real descending-neuron activity.
   let lastDir = [0, 0];
   let reachTriggeredAt = -Infinity;
   const REACH_RAMP = 0.15,
@@ -115,12 +123,20 @@ async function main() {
   }
 
   const _targetWorld = new THREE.Vector3();
+  const RETINA_SAMPLE_INTERVAL = 0.1;
+  let retinaAcc = 0;
   let last = performance.now() / 1000;
   function frame(nowMs) {
     requestAnimationFrame(frame);
     const now = nowMs / 1000;
     const dt = Math.min(0.1, now - last);
     last = now;
+
+    retinaAcc += dt;
+    if (retinaAcc >= RETINA_SAMPLE_INTERVAL) {
+      retinaAcc = 0;
+      brainViz.sendSensory(retina.sampleMotion(snake.canvas));
+    }
 
     const dir = snake.getDirection();
     if (dir[0] !== lastDir[0] || dir[1] !== lastDir[1]) {

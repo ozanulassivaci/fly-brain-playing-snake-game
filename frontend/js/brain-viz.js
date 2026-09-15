@@ -36,7 +36,7 @@ function makeGlowTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
-export async function createBrainViz(canvas) {
+export async function createBrainViz(canvas, { onMotor } = {}) {
   const data = await fetch('./assets/brain-subset.json').then((r) => r.json());
   const byCluster = { motion: [], cx: [], dn: [] };
   data.points.forEach((p, globalIndex) => {
@@ -114,6 +114,7 @@ export async function createBrainViz(canvas) {
       }
       if (msg.type === 'spikes') {
         for (const idx of msg.indices) flashGlobalIndex(idx);
+        if (msg.motor) onMotor?.(msg.motor.turn);
       }
     });
     ws.addEventListener('error', () => {
@@ -123,10 +124,18 @@ export async function createBrainViz(canvas) {
     console.warn('brain-viz: could not open WebSocket', err);
   }
 
-  function pulse(kind) {
+  function send(payload) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'event', kind }));
+      ws.send(JSON.stringify(payload));
     }
+  }
+
+  function pulse(kind) {
+    send({ type: 'event', kind });
+  }
+
+  function sendSensory(values) {
+    send({ type: 'sensory', ...values });
   }
 
   function render(nowSec) {
@@ -150,5 +159,5 @@ export async function createBrainViz(canvas) {
     renderer.render(scene, camera);
   }
 
-  return { render, pulse };
+  return { render, pulse, sendSensory };
 }
