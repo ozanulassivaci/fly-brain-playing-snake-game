@@ -510,6 +510,85 @@ per-population spike rates as before, just laid out and labeled to
 match the original's per-type-column style instead of abstracted into
 five stage names.
 
+**Phase 3.3 — real neurotransmitter sign, ring topology correction, turn
+cadence tuning, and a final honest measurement (done).** Triggered by
+direct user feedback after playing: the snake sometimes moved toward the
+apple but turned too late and hit a wall, and sometimes went in the exact
+opposite direction. Investigated three real, independent issues rather
+than re-tuning constants blindly:
+
+1. **Neurotransmitter sign.** docs previously assumed no excitatory/
+   inhibitory sign data existed for this dataset. Checked again, properly:
+   the full `Neuprint_Neurons.feather` (already downloaded for the Phase 0
+   ROI cross-check) carries real per-neuron `consensusNt` predictions.
+   Delta7 — the real, well-known inhibitory ring-attractor-sharpening
+   interneuron in the fly compass circuit — is 100% glutamate in this data
+   (42/42 neurons), and the central-complex cluster overall is ~32% GABA
+   or glutamate (994/3137), all previously simulated as excitatory like
+   everything else. Fixed: `prepare_subset.py` now merges `consensusNt`
+   and computes `nt_sign` (GABA/glutamate = -1, else +1, standard
+   fly-connectome convention), and `lif.py` indexes it by each edge's
+   presynaptic neuron. Network stability re-verified after the change (no
+   runaway, no dead clusters).
+
+2. **Ring topology.** Tried making FC's goal code side-aware (an 18-slot
+   code mirroring the heading ring) on the theory that a side-blind FC
+   code and a side-aware EPG code were mismatched coordinate systems —
+   checked real connectivity before committing to it, found FC_L and
+   FC_R project to PFL_L/PFL_R almost identically (e.g. FC_L->PFL_L 4199
+   vs FC_L->PFL_R 3859), meaning side isn't a meaningful axis for FC.
+   Reverted. Separately checked the heading ring itself: the PB's 18
+   glomeruli are a real, published "double-wrapped" ring (Wolff & Rubin;
+   Turner-Evans et al.) — the same 9 angular positions appear once per
+   hemisphere, both jointly representing one heading, not 18 independent
+   positions. Confirmed directly: EPG_L#k projects to EPG_R#k (matching
+   glomerulus number) at ~8x the average weight of EPG_L#k to a
+   different-numbered EPG_R#k2. Both FC and EPG now use the same
+   9-position space, injecting into both hemispheres' matching
+   column/glomerulus together for one coherent bump.
+
+3. **Turn cadence.** Edge-triggered turning (the Phase 3.2 follow-up fix)
+   stopped the circling bug but created a different problem: the snake
+   travels straight for as long as the backend's decision holds (measured
+   up to ~4.5 real seconds), often long enough to hit a wall on this
+   project's 20x20 grid before the next transition ever comes — this is
+   exactly the "turns too late" bug reported. Replaced with a cooldown
+   (`MIN_TURN_TICKS = 2` in `snake-game.js`): a sustained non-straight
+   decision re-executes a turn every 2 ticks for as long as it holds,
+   instead of never again (too rare) or every tick (spins — confirmed by
+   testing `min_turn_ticks=1`, which reproduces the original circling
+   bug). Chosen as a reasonable middle ground between two known-bad
+   extremes.
+
+**Honest final measurement.** After all three fixes, ran repeated
+60-second-episode gameplay simulations (goal+heading circuit vs. no goal
+information at all, matching the real frontend's exact turning logic —
+an earlier round of this same testing was invalidated when the test
+harness turned out to still use the pre-fix circling logic, a bug in the
+test itself, not the app). Results across independent batches of 24
+episodes each, same configuration, different random seeds:
+- Batch 1: 8 apples (goal+heading) vs. 4 apples (no goal) — looked like
+  a real 2x improvement.
+- Batch 2 (replication): 1 apple (goal+heading) vs. 5 apples (no goal) —
+  the *opposite* pattern, same configuration.
+
+This is the same "don't trust one run" lesson this project has hit
+before (Phase 3.1), now confirmed by direct replication at the full
+gameplay level: **none of Phase 3.3's fixes, individually or combined,
+produced a measurable, reproducible improvement in apple-eating success
+over having no goal information at all.** Every fix made in this phase
+is real, defensible, and correct on its own biological/logical merits
+(the neurotransmitter sign was genuinely wrong before; the ring topology
+was genuinely mismatched; the turn cadence genuinely needed to be
+somewhere between two bad extremes) — but the compounding uncertainty of
+an uncalibrated LIF network (arbitrary `WEIGHT_SCALE`, no real
+conductance data, small population counts of 16-50 neurons per readout
+group) appears to dominate over whatever real signal the anatomy
+provides, at least at the sample sizes tractable in this project. A
+genuinely reliable fix would likely require calibrating the network
+against real physiological firing-rate/response data rather than
+tuning constants by hand, which is out of scope here.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
