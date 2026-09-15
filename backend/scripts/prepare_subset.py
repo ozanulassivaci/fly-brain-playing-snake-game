@@ -113,6 +113,12 @@ def write_backend_edges(subset: pd.DataFrame) -> None:
     edge_post = internal["body_post"].map(body_to_index).to_numpy(dtype=np.int32)
     edge_weight = internal["weight"].to_numpy(dtype=np.float32)
     cluster = subset["cluster"].to_numpy()
+    # Phase 3: real per-neuron type (for T4/T5 a/b/c/d direction-tuned
+    # sensory targeting) and soma side (for descending-neuron L/R motor
+    # readout) — see docs/architecture-plan.md for why these are real,
+    # usable biological structure rather than made-up labels.
+    neuron_type = subset["type"].fillna("").to_numpy(dtype=str)
+    soma_side = subset["somaSide"].fillna("").to_numpy(dtype=str)
 
     DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
     out_path = DATA_PROCESSED / "subset.npz"
@@ -122,6 +128,8 @@ def write_backend_edges(subset: pd.DataFrame) -> None:
         edge_post=edge_post,
         edge_weight=edge_weight,
         cluster=cluster,
+        neuron_type=neuron_type,
+        soma_side=soma_side,
         n_neurons=len(subset),
     )
     print(f"wrote {out_path} ({len(subset)} neurons, {len(edge_pre)} internal edges)")

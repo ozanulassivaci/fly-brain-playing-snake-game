@@ -43,6 +43,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
             if msg.get("type") == "event":
                 sim.inject_event(msg.get("kind", ""))
+            elif msg.get("type") == "sensory":
+                sim.inject_sensory(msg)
     except WebSocketDisconnect:
         pass
     finally:
@@ -54,7 +56,7 @@ async def simulation_loop():
     while True:
         spiked = sim.step_batch(STEPS_PER_BROADCAST)
         if clients:
-            payload = json.dumps({"type": "spikes", "indices": spiked})
+            payload = json.dumps({"type": "spikes", "indices": spiked, "motor": {"turn": sim.read_motor()}})
             dead = []
             for ws in clients:
                 try:
