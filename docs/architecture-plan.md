@@ -470,14 +470,45 @@ future phase, not attempted here. What shipped and is worth keeping
 regardless of the success-rate result: the fix for a genuine bug (FC's
 own homeostasis was crushing PFL, unrelated to whether the circuit
 would ultimately work), a completed (not half-built) biological
-comparator circuit for any future attempt to build on, and the
-restored 2D decision panel (`frontend/js/decision-panel.js`) showing
-this real pipeline — Motion → Goal (FC) → Compare (PFL) → Steer (DNa,
-split L/R) → Turn — driven by the same real `group_activity_ema` rates
-the backend actually computes, not a decorative animation. Apple-eating
-success in this project remains low; that is reported here plainly
-rather than dressed up, matching how every other measurement in this
-project has been handled.
+comparator circuit for any future attempt to build on, and a 2D
+decision panel (`frontend/js/decision-panel.js`, see the follow-up
+below for its final form) driven by the same real `group_activity_ema`
+rates the backend actually computes, not a decorative animation.
+Apple-eating success in this project remains low; that is reported
+here plainly rather than dressed up, matching how every other
+measurement in this project has been handled.
+
+**Phase 3.2 follow-up — spinning-in-circles bug and the decision panel's
+final layout (done).** After Phase 3.2 shipped, real gameplay showed
+the snake repeatedly spinning in tight circles in one direction. Root
+cause: `backend/lif.py`'s `_update_motor()` hysteresis holds a
+"left"/"right" decision for a while once triggered (measured directly:
+anywhere from ~10 to ~227 broadcasts, i.e. up to ~4.5 real seconds, out
+of a representative 60-second run with 90 total state segments) rather
+than flipping every broadcast — that debouncing is intentional. But
+`frontend/js/snake-game.js`'s `applyTurn()`/`step()` applied a 90-degree
+turn on *every game tick* for as long as that decoded state held, so a
+single ~4.5-second hold (spanning ~30 ticks at `TICK_SECONDS=0.15`)
+compounded into ~30 repeated 90-degree turns — a tight spinning circle,
+not a bug in the neural signal itself. Fixed by making turning
+edge-triggered: `applyTurn()` now only arms a turn on an actual
+straight→left or straight→right transition in the decoded decision,
+and `step()` consumes and clears that single-shot flag on the very next
+tick, regardless of how many more broadcasts keep reporting the same
+held state.
+
+Separately, revisited the initial Phase 3.2 decision panel after
+feedback that it should look like Phase 1's original node-link diagram
+— one column per real brain region, several individually labeled real
+neuron types glowing per column — rather than a generic 5-box flow
+diagram. Rebuilt `decision-panel.js` on that layout: **Motion**
+(T4/T5 a/b/c/d direction subtypes, individually tracked via the
+existing `direction_masks` — previously only exposed as one aggregate
+rate), **Central Cx** (EPG heading, FC goal, PFL compare), **Steering
+DN** (DNa L, DNa R), plus a turn readout — all driven by the same real
+per-population spike rates as before, just laid out and labeled to
+match the original's per-type-column style instead of abstracted into
+five stage names.
 
 ## Open risks / unresolved questions
 
