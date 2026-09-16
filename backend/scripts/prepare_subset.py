@@ -29,6 +29,35 @@ DATA_PROCESSED = REPO_ROOT / "data" / "processed"
 FRONTEND_ASSETS = REPO_ROOT / "frontend" / "assets"
 
 MOTION_PATTERN = re.compile(r"^(T4|T5|LC\d|LPLC\d|LT\d)")
+
+# Phase 3.8: the olfactory / mushroom-body pathway. Real flies find food
+# primarily by smell, and the whole canonical circuit is present in this
+# dataset (checked before adding it): antennal-lobe projection neurons
+# (541 with soma positions, 273 L / 273 R) -> Kenyon cells (4050) -> MBON
+# (90) -> DNa* steering, that last step at 1145 total weight, the same
+# order as LC10's ~970 into the same readout. PAM (314 dopaminergic
+# neurons) sits exactly where it does in the real animal: projecting onto
+# the Kenyon cells (KCg-m alone at 68,532 weight), i.e. onto the KC->MBON
+# synapses whose plasticity is what dopamine actually does. APL is the
+# mushroom body's big inhibitory interneuron.
+#
+# The 2635 ORNs are deliberately *not* included: not one of them has a
+# soma position (0/2635), because olfactory receptor neurons sit in the
+# antenna rather than the brain volume this reconstruction covers. Odour
+# therefore enters at the PN stage — the antennal lobe's output, which is
+# the odour representation the rest of the brain actually sees, and the
+# right level for a model that cannot claim to reproduce ORN gain control
+# anyway.
+#
+# Worth recording plainly: the olfactory pathway has essentially *no*
+# direct route to steering on its own — PN->FC is 1 weight and PN->DNa is
+# 2. Smell only reaches behaviour through the mushroom body, which is
+# also why odour and dopamine are one feature rather than two.
+PN_PATTERN = re.compile(r"^[A-Z]+[0-9a-z]*_[a-z]*PN")
+KC_PATTERN = re.compile(r"^KC")
+MBON_PATTERN = re.compile(r"^MBON")
+PAM_PATTERN = re.compile(r"^PAM")
+APL_PATTERN = re.compile(r"^APL$")
 CORE_CX_ROI_PATTERN = re.compile(r"^(EB|FB|PB(\(|$)|NO$|NO\()")
 MIN_CX_SYNWEIGHT = 5
 # FC (fan-shaped body columnar, real goal-direction cell types) instance
@@ -140,8 +169,25 @@ def build_subset() -> pd.DataFrame:
     motion_mask = traced["type"].isin(motion_types)
     dn_mask = traced["superclass"] == "descending_neuron"
 
+    types = traced["type"].fillna("")
+    olf_masks = {
+        "pn": types.str.match(PN_PATTERN),
+        "kc": types.str.match(KC_PATTERN),
+        "mbon": types.str.match(MBON_PATTERN),
+        "pam": types.str.match(PAM_PATTERN),
+        "apl": types.str.match(APL_PATTERN),
+    }
+    olf_any = olf_masks["pn"]
+    for m in olf_masks.values():
+        olf_any = olf_any | m
+
     cx_ids = set(roi_df.loc[roi_df["roiInfo"].apply(has_core_cx_roi), "bodyId"])
     cx_mask = traced["bodyId"].isin(cx_ids)
+
+    olf_cluster_by_id = {}
+    for name, mask in olf_masks.items():
+        for body_id in traced.loc[mask, "bodyId"]:
+            olf_cluster_by_id.setdefault(body_id, name)
 
     def cluster_for(row) -> str | None:
         if row["superclass"] == "descending_neuron":
@@ -150,9 +196,9 @@ def build_subset() -> pd.DataFrame:
             return "cx"
         if row["type"] in motion_types:
             return "motion"
-        return None
+        return olf_cluster_by_id.get(row["bodyId"])
 
-    subset = traced[motion_mask | cx_mask | dn_mask].copy()
+    subset = traced[motion_mask | cx_mask | dn_mask | olf_any].copy()
     subset["cluster"] = subset.apply(cluster_for, axis=1)
     subset = subset.merge(nt_df, on="bodyId", how="left")
     subset = subset[subset["somaLocation"].notna()].reset_index(drop=True)

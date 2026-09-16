@@ -139,12 +139,15 @@ async function main() {
     if (retinaAcc >= RETINA_SAMPLE_INTERVAL) {
       retinaAcc = 0;
       const threat = snake.getThreat();
+      const odour = snake.getOdour();
       brainViz.sendSensory({
         ...retina.sampleMotion(snake.canvas),
         bearing: snake.getGoalAngle(),
         heading: snake.getHeadingAngle(),
         threat_left: threat.left,
         threat_right: threat.right,
+        odour_left: odour.left,
+        odour_right: odour.right,
       });
     }
 

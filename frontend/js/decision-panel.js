@@ -36,6 +36,19 @@ const COLUMNS = [
     ],
   },
   {
+    // Phase 3.8: the olfactory / mushroom-body pathway. Present, real and
+    // genuinely driven — and measurably *not* steering: see
+    // docs/architecture-plan.md. Shown because it is part of the brain
+    // being simulated, not because it moves the snake.
+    title: 'Smell',
+    nodes: [
+      { key: 'pn_left', label: 'PN L', ref: 0.08 },
+      { key: 'pn_right', label: 'PN R', ref: 0.08 },
+      { key: 'kc', label: 'KC', ref: 0.0005 },
+      { key: 'mbon', label: 'MBON', ref: 0.0005 },
+    ],
+  },
+  {
     title: 'CX',
     nodes: [
       { key: 'epg', label: 'EPG', ref: 0.05 },
@@ -44,7 +57,7 @@ const COLUMNS = [
     ],
   },
   {
-    title: 'Steer DN',
+    title: 'Steer',
     nodes: [
       { key: 'dna_left', label: 'DNa L', ref: 0.002 },
       { key: 'dna_right', label: 'DNa R', ref: 0.002 },

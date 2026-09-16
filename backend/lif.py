@@ -56,6 +56,11 @@ INHIB_GAIN = {
     "epg": 400.0,
     "lc10": 400.0,
     "lplc1": 400.0,
+    "pn": 400.0,
+    "kc": 400.0,
+    "mbon": 400.0,
+    "pam": 400.0,
+    "apl": 400.0,
 }
 ACTIVITY_EMA_TAU_MS = 20.0
 
@@ -260,6 +265,21 @@ ESCAPE_DN_TYPE_PATTERN = re.compile(r"^DNp(03|06|11|35|103)$")
 # approach-avoidance failure and not what we want.
 ESCAPE_GAIN = 0.01
 
+# Phase 3.8: odour. Real flies locate food mainly by smell, and unlike the
+# frontal visual channel it works in every direction — including behind,
+# where LC10 is blind and where an apple that has just respawned often is.
+# Injected at the antennal-lobe projection neurons rather than at ORNs,
+# because not one of this dataset's 2635 ORNs has a soma position (they
+# are in the antenna, outside the reconstructed volume) — see
+# prepare_subset.py. PN activity is the odour representation the rest of
+# the brain receives, which is the honest level for this model.
+#
+# Bilateral, because that is how a walking fly localises an odour source:
+# the two antennae sample slightly different concentrations and the
+# difference steers the turn. The concentrations themselves are computed
+# from real geometry in snake-game.js, exactly as the apple bearing is.
+ODOUR_SCALE = 1.0
+
 # Phase 3.5: real trajectories showed the fly making one lucky early
 # approach, then drifting away and wandering in a distant region for the
 # rest of the episode without ever correcting back. First hypothesis
@@ -368,6 +388,11 @@ class LifSimulation:
             "epg": torch.from_numpy(is_epg.astype(np.float32)).to(self.device),
             "lc10": torch.from_numpy(is_lc10.astype(np.float32)).to(self.device),
             "lplc1": torch.from_numpy(is_lplc1.astype(np.float32)).to(self.device),
+            "pn": torch.from_numpy((cluster == "pn").astype(np.float32)).to(self.device),
+            "kc": torch.from_numpy((cluster == "kc").astype(np.float32)).to(self.device),
+            "mbon": torch.from_numpy((cluster == "mbon").astype(np.float32)).to(self.device),
+            "pam": torch.from_numpy((cluster == "pam").astype(np.float32)).to(self.device),
+            "apl": torch.from_numpy((cluster == "apl").astype(np.float32)).to(self.device),
         }
 
         fc_column = data["fc_column"]
@@ -400,6 +425,10 @@ class LifSimulation:
         self.lplc1_left_mask = torch.from_numpy((is_lplc1 & (soma_side == "L")).astype(np.float32)).to(self.device)
         self.lplc1_right_mask = torch.from_numpy((is_lplc1 & (soma_side == "R")).astype(np.float32)).to(self.device)
 
+        is_pn = cluster == "pn"
+        self.pn_left_mask = torch.from_numpy((is_pn & (soma_side == "L")).astype(np.float32)).to(self.device)
+        self.pn_right_mask = torch.from_numpy((is_pn & (soma_side == "R")).astype(np.float32)).to(self.device)
+
         is_escape_dn = np.array([bool(ESCAPE_DN_TYPE_PATTERN.match(t)) for t in neuron_type])
         self.escape_left_mask = torch.from_numpy((is_escape_dn & (soma_side == "L")).astype(np.float32)).to(
             self.device
@@ -430,6 +459,10 @@ class LifSimulation:
             "lplc1_right": self.lplc1_right_mask,
             "escape_left": self.escape_left_mask,
             "escape_right": self.escape_right_mask,
+            "pn_left": self.pn_left_mask,
+            "pn_right": self.pn_right_mask,
+            "mbon": self.cluster_masks["mbon"],
+            "kc": self.cluster_masks["kc"],
             "epg": self.cluster_masks["epg"],
             "fc": self.cluster_masks["fc"],
             "pfl": self.cluster_masks["pfl"],
@@ -511,6 +544,8 @@ class LifSimulation:
             self.inject_goal(values["bearing"])
         if "heading" in values:
             self.inject_heading(values["heading"])
+        if "odour_left" in values or "odour_right" in values:
+            self.inject_odour(float(values.get("odour_left", 0.0)), float(values.get("odour_right", 0.0)))
         if "threat_left" in values or "threat_right" in values:
             self.inject_obstacle(float(values.get("threat_left", 0.0)), float(values.get("threat_right", 0.0)))
         if "bearing" in values and "heading" in values:
@@ -518,6 +553,15 @@ class LifSimulation:
                 np.sin(values["bearing"] - values["heading"]), np.cos(values["bearing"] - values["heading"])
             )
             self.inject_visual_target(float(ego_bearing))
+
+    def inject_odour(self, odour_left: float, odour_right: float) -> None:
+        # Straight bilateral drive: whichever antenna smells more food gets
+        # the stronger input, and everything after that — PN -> Kenyon cell
+        # -> MBON -> descending neuron — is the connectome's own wiring.
+        if odour_left > 0:
+            self.external_drive += self.pn_left_mask * (odour_left * ODOUR_SCALE)
+        if odour_right > 0:
+            self.external_drive += self.pn_right_mask * (odour_right * ODOUR_SCALE)
 
     def inject_obstacle(self, threat_left: float, threat_right: float) -> None:
         # Contralateral by construction: a threat on the left drives the

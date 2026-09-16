@@ -1,6 +1,7 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
 const THREAT_RADIUS = 6; // cells the looming channel can see (see getThreat)
+const ANTENNA_OFFSET = 0.6; // cells either side of the head (see getOdour)
 // Brain-controlled only (Phase 3) — no keyboard input. Earlier attempts to
 // fix a spinning-in-circles bug worked around it in this game layer
 // (edge-triggering, then a fixed turn cooldown) instead of fixing the real
@@ -198,10 +199,42 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
     return { left, right };
   }
 
+  // Bilateral odour concentration at two "antennae" offset either side of
+  // the head — the cue a real fly actually uses to find food, and the one
+  // channel here that works in every direction, including behind, where
+  // the frontal visual pathway is blind and a freshly respawned apple
+  // often is. Inverse-square falloff from a point source, which is the
+  // standard idealisation of a still-air odour field.
+  function getOdour() {
+    const head = snake[0];
+    const [hx, hy] = dir;
+    const rx = -hy,
+      ry = hx;
+    const conc = (ax, ay) => {
+      const dx = apple.x - ax,
+        dy = apple.y - ay;
+      return 1 / (1 + dx * dx + dy * dy);
+    };
+    return {
+      left: conc(head.x - rx * ANTENNA_OFFSET, head.y - ry * ANTENNA_OFFSET),
+      right: conc(head.x + rx * ANTENNA_OFFSET, head.y + ry * ANTENNA_OFFSET),
+    };
+  }
+
   reset();
   function getScore() {
     return { score, bestScore, alive };
   }
 
-  return { canvas, update, getDirection, applyTurn, getHeadingAngle, getGoalAngle, getThreat, getScore };
+  return {
+    canvas,
+    update,
+    getDirection,
+    applyTurn,
+    getHeadingAngle,
+    getGoalAngle,
+    getThreat,
+    getOdour,
+    getScore,
+  };
 }
