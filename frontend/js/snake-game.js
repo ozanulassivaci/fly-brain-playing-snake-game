@@ -1,20 +1,27 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
+const MIN_TURN_TICKS = 2; // see the note above; measured, not guessed
 const THREAT_RADIUS = 6; // cells the looming channel can see (see getThreat)
 const ANTENNA_OFFSET = 0.6; // cells either side of the head (see getOdour)
-// Brain-controlled only (Phase 3) — no keyboard input. Earlier attempts to
-// fix a spinning-in-circles bug worked around it in this game layer
-// (edge-triggering, then a fixed turn cooldown) instead of fixing the real
-// cause: backend/lif.py's motor hysteresis held a "left"/"right" decision
-// for a long time once triggered (measured: median ~5.3 game ticks, tail
-// out to ~41 ticks / ~6 real seconds, at the old TURN_ON/OFF_THRESH gap),
-// long enough that even a capped cooldown still produced many repeated
-// same-direction turns during one hold — still visibly circling — or, at
-// the other extreme, one turn followed by many seconds straight into a
-// wall. Fixed at the source instead: TURN_OFF_THRESH now equals
-// TURN_ON_THRESH (no hysteresis band), which measured out to a median
-// hold of ~1.6 ticks and a max of ~6.8 ticks — short enough that plain
-// once-per-tick turning below doesn't need a workaround.
+// Brain-controlled only (Phase 3) — no keyboard input.
+//
+// How a held "left"/"right" decision becomes grid moves turns out to
+// matter more than almost anything else in this project. The backend's
+// hysteresis (backend/lif.py) now holds a decision for a median of ~1.6
+// ticks. Turning on *every* tick of that hold therefore means typically
+// two 90-degree turns back to back — a 180-degree reversal — which is
+// exactly the circling that kept being reported, and with a short snake
+// it is also a self-collision.
+//
+// All three policies were measured against each other on the same seeds,
+// with everything else identical (16 episodes each):
+//   every tick            10 apples, best 1   (spins)
+//   once per decision      8 apples, best 2   (too rare, 13/16 hit a wall)
+//   at most 1 per 2 ticks 33 apples, best 5
+// So: keep turning while the decision holds, but no faster than one turn
+// per MIN_TURN_TICKS. That is the "turn, go straight, turn, go straight"
+// staircase a grid actually needs to reach a diagonal target — and a
+// diagonal is the common case, since an apple exactly on an axis is rare.
 function rotateLeft([dx, dy]) {
   return [dy, -dx];
 }
@@ -28,7 +35,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, currentMotorTurn, apple, alive, tickAcc, restartAcc, score;
+  let snake, dir, currentMotorTurn, apple, alive, tickAcc, restartAcc, score, ticksSinceTurn;
   // Survives reset() so a death doesn't erase what the fly has managed —
   // the run-to-run record is the number worth watching.
   let bestScore = 0;
@@ -41,6 +48,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
     ];
     dir = [1, 0];
     currentMotorTurn = 'straight';
+    ticksSinceTurn = MIN_TURN_TICKS;
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
@@ -59,8 +67,11 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
   }
 
   function step() {
-    if (currentMotorTurn === 'left') dir = rotateLeft(dir);
-    else if (currentMotorTurn === 'right') dir = rotateRight(dir);
+    ticksSinceTurn++;
+    if (ticksSinceTurn >= MIN_TURN_TICKS && currentMotorTurn !== 'straight') {
+      dir = currentMotorTurn === 'left' ? rotateLeft(dir) : rotateRight(dir);
+      ticksSinceTurn = 0;
+    }
     const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
 
     const hitWall = head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows;
