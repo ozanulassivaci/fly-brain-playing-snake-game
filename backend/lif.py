@@ -52,7 +52,7 @@ TARGET_RATE = 0.0003  # target fraction of neurons spiking per 1ms step
 # while motion/dn landed close to it — CX's local recurrent excitation is
 # evidently much stronger, so its proportional controller needs a bigger
 # correction for the same size of error).
-INHIB_GAIN = {"motion": 40.0, "cx": 400.0, "dn": 40.0, "fc": 400.0, "pfl": 400.0, "epg": 400.0}
+INHIB_GAIN = {"motion": 40.0, "cx": 400.0, "dn": 40.0, "fc": 400.0, "pfl": 400.0, "epg": 400.0, "lc10": 400.0}
 ACTIVITY_EMA_TAU_MS = 20.0
 
 # Phase 3: real per-neuron structure used for sensory-in/motor-out, not made
@@ -144,6 +144,36 @@ HEADING_SIGMA = 1.5  # bump width in ring positions (matches GOAL_SIGMA: same-si
 TURN_ON_THRESH = 0.0001
 TURN_OFF_THRESH = 0.0001
 
+# Phase 3.4: direct visual pursuit via LC10, the real, published
+# target-pursuit visual projection neuron (Ribeiro et al. 2018 — LC10a
+# detects a small salient visual target and drives steering toward it via
+# DNp11; a male fly pursuing a female uses exactly this pathway). This is
+# the anatomically correct real circuit for "sees something and flies
+# straight at it" — unlike central-complex path integration (FC/EPG/PFL,
+# above), which is for returning to a remembered location, not real-time
+# visual target acquisition. Checked directly against this dataset before
+# using it: every LC10 subtype present (a, b, c-1, c-2, d, e; 960 neurons
+# total) projects to DNa* steering neurons with a *perfectly* ipsilateral,
+# zero-crosstalk pattern — e.g. LC10a_L -> DNa_L is 377 weight / LC10a_L ->
+# DNa_R is exactly 0, and the mirror image for LC10a_R — the cleanest,
+# least ambiguous real structure found in this whole project, needing no
+# delicate goal-vs-heading subtraction the way PFL3 does. DNa10 (the
+# single strongest target, 801+424 weight) is already inside the existing
+# DNa* steering readout, so no new readout population is needed.
+#
+# LC10 has no real retinotopic/spatial-position label in this dataset
+# (unlike FC's column or EPG's glomerulus), so there is no way to build a
+# genuine per-angle receptive-field map — only real, verified left/right
+# separation. Injection uses the *egocentric* bearing (target angle
+# relative to current heading, computed from the allocentric
+# bearing/heading already sent for FC/EPG) rather than an allocentric one:
+# visual detection is inherently egocentric (where does the target appear
+# in my current field of view), unlike the CX pathway's shared world-frame
+# comparison — there is no PFL-style comparator neuron in this pathway to
+# do that subtraction for us.
+LC10_TYPE_PATTERN = re.compile(r"^LC10")
+VISUAL_SCALE = 1.0
+
 
 class LifSimulation:
     def __init__(self, device: str | None = None):
@@ -201,14 +231,24 @@ class LifSimulation:
         # PFL/FC's own pools, crush EPG's own output the moment it fires
         # enough to be useful).
         is_epg = np.array([str(t).startswith("EPG") for t in neuron_type])
+        # LC10 gets the same treatment, split out of "motion" this time
+        # (LC10 matches MOTION_PATTERN's "LC\d" in prepare_subset.py) — same
+        # reasoning as fc/pfl/epg: sustained visual-target injection would
+        # otherwise push the whole motion-cluster average up and have its
+        # homeostatic inhibition crush LC10's own output, or (if motion's
+        # T4/T5 neurons stayed lumped in with it) crush the real optic-flow
+        # signal Phase 3's turning already depends on.
+        is_lc10 = np.array([bool(LC10_TYPE_PATTERN.match(t)) for t in neuron_type])
         cx_other = (cluster == "cx") & ~is_fc & ~is_pfl & ~is_epg
+        motion_other = (cluster == "motion") & ~is_lc10
         self.cluster_masks = {
-            "motion": torch.from_numpy((cluster == "motion").astype(np.float32)).to(self.device),
+            "motion": torch.from_numpy(motion_other.astype(np.float32)).to(self.device),
             "cx": torch.from_numpy(cx_other.astype(np.float32)).to(self.device),
             "dn": torch.from_numpy((cluster == "dn").astype(np.float32)).to(self.device),
             "fc": torch.from_numpy(is_fc.astype(np.float32)).to(self.device),
             "pfl": torch.from_numpy(is_pfl.astype(np.float32)).to(self.device),
             "epg": torch.from_numpy(is_epg.astype(np.float32)).to(self.device),
+            "lc10": torch.from_numpy(is_lc10.astype(np.float32)).to(self.device),
         }
 
         fc_column = data["fc_column"]
@@ -236,6 +276,9 @@ class LifSimulation:
         self.dn_left_count = max(1.0, float(self.dn_left_mask.sum().item()))
         self.dn_right_count = max(1.0, float(self.dn_right_mask.sum().item()))
 
+        self.lc10_left_mask = torch.from_numpy((is_lc10 & (soma_side == "L")).astype(np.float32)).to(self.device)
+        self.lc10_right_mask = torch.from_numpy((is_lc10 & (soma_side == "R")).astype(np.float32)).to(self.device)
+
         # Extra named populations tracked only for the frontend decision-flow
         # panel (not used to drive any dynamics beyond the homeostatic split
         # above) — real per-type-group activity so the panel shows genuine
@@ -250,6 +293,8 @@ class LifSimulation:
             "motion_b": self.direction_masks["b"],
             "motion_c": self.direction_masks["c"],
             "motion_d": self.direction_masks["d"],
+            "lc10_left": self.lc10_left_mask,
+            "lc10_right": self.lc10_right_mask,
             "epg": self.cluster_masks["epg"],
             "fc": self.cluster_masks["fc"],
             "pfl": self.cluster_masks["pfl"],
@@ -298,6 +343,26 @@ class LifSimulation:
             self.inject_goal(values["bearing"])
         if "heading" in values:
             self.inject_heading(values["heading"])
+        if "bearing" in values and "heading" in values:
+            ego_bearing = np.arctan2(
+                np.sin(values["bearing"] - values["heading"]), np.cos(values["bearing"] - values["heading"])
+            )
+            self.inject_visual_target(float(ego_bearing))
+
+    def inject_visual_target(self, ego_bearing: float) -> None:
+        # Egocentric: 0 = target straight ahead, +-pi/2 = directly to the
+        # side. A smooth sin-based split rather than a hard left/right
+        # switch, since we only have real L/R separation to work with (no
+        # retinotopic position label — see the Phase 3.4 comment above
+        # LC10_TYPE_PATTERN) — this still gives zero drive when the target
+        # is dead ahead or directly behind and maximum drive when it's
+        # squarely to one side, without an arbitrary discontinuity at 0.
+        right_amount = max(0.0, float(np.sin(ego_bearing))) * VISUAL_SCALE
+        left_amount = max(0.0, float(-np.sin(ego_bearing))) * VISUAL_SCALE
+        if right_amount:
+            self.external_drive += self.lc10_right_mask * right_amount
+        if left_amount:
+            self.external_drive += self.lc10_left_mask * left_amount
 
     def inject_goal(self, bearing: float) -> None:
         target = (bearing / (2 * np.pi)) * FC_COLUMNS
