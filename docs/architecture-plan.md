@@ -961,6 +961,49 @@ not a memory. The plasticity was removed and the reasoning recorded in
 `lif.py`; it is worth revisiting only if the game ever gains a second
 smell worth telling apart.
 
+**Phase 3.10 — the turn-execution policy, which mattered more than any
+circuit (done).** The report was that the fly still wandered in circles
+and took tens of seconds to reach an apple instead of going at it
+directly, and would even orbit an apple it had reached without eating
+it. Both turned out to come from the same place, and it was not the
+sensing: it was how a held left/right decision becomes grid moves.
+
+The backend holds a decision for a median of ~1.6 ticks. Applying it on
+*every* tick of that hold therefore means typically two 90-degree turns
+back to back — a 180-degree reversal. That is the circling, and with a
+short snake it is also a self-collision. The orbiting-next-to-the-apple
+case has the same root with a geometric twist: a diagonally adjacent
+apple sits at exactly 45°, right on the edge of `VISUAL_DEADZONE`, so
+the fly turned, overshot, and went round.
+
+All three policies measured on identical seeds, 16 episodes each,
+everything else unchanged:
+
+| policy | apples | best episode | self-collisions |
+| --- | --- | --- | --- |
+| turn every tick (was) | 10 | 1 | 9/16 |
+| turn once per decision | 8 | 2 | 3/16 |
+| **at most one per 2 ticks** | **33** | **5** | **1/16** |
+
+Worth noting *why* this was missed for so long: the middle policy was
+tried back in Phase 3.6 and rejected, correctly, because the hysteresis
+was long then (median 5.3 ticks) so one turn per decision left the fly
+running straight into walls. The rate-limited policy was tried too, in
+the same era, and also failed — for the same reason. Once Phase 3.6
+shortened the hysteresis, the combination that had never been tested was
+short hysteresis *plus* rate limiting, and that is the one that works.
+A reminder that a rejected option can be worth re-testing after the
+thing that made it fail has changed.
+
+With the cooldown in place, the obstacle-avoidance gain was re-swept in
+the new regime; `ESCAPE_GAIN = 0.01` is still the best point (36 apples
+against 19 at 0.05 and 13 at 0.15 — raising it makes the fly survive
+more and eat much less, the same approach-avoidance trade-off as before).
+
+Live in the browser: the fly now eats two apples inside the first thirty
+seconds and survives over two minutes on a single life, against roughly
+one apple per 30-90 seconds and near-immediate death before.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
