@@ -904,6 +904,63 @@ and now have their own "Smell" column in the decision panel — but the
 panel comment and this document both say plainly that they are not what
 drives the fly.
 
+**Phase 3.9 — odour made to work, and dopamine measured and removed
+(done).** Phase 3.8 concluded odour could not guide the fly. That
+conclusion was wrong in an instructive way: the *mechanism* was wrong,
+not the idea. It injected raw bilateral concentration and asked the
+mushroom body for a left/right steering command, which that structure
+cannot produce — each Kenyon cell samples glomeruli at random, so a
+bilateral difference does not survive it. What a real fly does, and what
+was being asked for, is gradient following over time.
+
+Two changes turned it into a working channel:
+
+1. **Adaptation.** Real olfactory neurons report a *change* in
+   concentration, not its level, so PN drive is now concentration minus a
+   slowly tracking baseline (1.5s). Measured: approaching gives PN 0.075,
+   receding 0.00015 — a 300x separation that simply did not exist before.
+2. **The lateral horn** (2028 neurons, added to the subset). This is
+   olfaction's *innate* output, as opposed to the mushroom body's learned
+   one: PN→LH is 378,010 weight and LH→descending 22,810. Leaving it out
+   was why the signal had nowhere to go but the MB — which actively
+   suppresses it (MBON activity *drops* when odour rises: sparse coding,
+   APL inhibition, genuinely inhibitory MBONs; that is the learned-valence
+   half doing its job, not a bug). LH now rises to 0.0011 approaching
+   against 0.0002 receding.
+
+The coupling is **klinokinesis**, read as common mode rather than
+difference: while the smell strengthens, the threshold to commit to a
+turn rises, so the fly holds course; when it stops strengthening, the
+threshold drops and it turns and searches. Direction still comes
+entirely from LC10/LPLC1 and their real ipsilateral wiring — odour never
+says which way, only whether to keep going.
+
+Measured across five independent 12-20 episode batches, odour off vs on:
+7/11, 15/15, 13/17, 9/12, 14/16 — **58 apples against 71 over 88
+episodes, about +22%, positive in four batches and negative in none**.
+Best single-episode score reached 3, up from 1. The exact gain sits
+inside the noise; 10000 is chosen because it roughly doubles the turn
+threshold on a typical measured rise.
+
+**Dopamine: built, measured, removed.** Reward now drives PAM, the real
+dopaminergic cluster (correcting Phase 1's blanket event, which hit the
+descending neurons directly). Mushroom-body plasticity was then
+implemented properly — PAM→KC gating the 59,709 KC→MBON synapses, with
+the canonical rule that dopamine coinciding with recent Kenyon-cell
+activity depresses them, plus an eligibility trace and a slow decay back
+to the connectome's own weights. It worked mechanically (a reward burst
+depressed the traced synapses by 22%) and made the fly slightly *worse*:
+14 apples over ten minutes against 21 with the rule off, the plastic
+weights collapsing to their 25% floor.
+
+That is the task, not the tuning: **associative learning needs something
+to associate.** This game has exactly one odour, the apple, and it is
+always rewarded. With no second cue to discriminate against, the only
+thing the rule can do is depress everything uniformly — a gain change,
+not a memory. The plasticity was removed and the reasoning recorded in
+`lif.py`; it is worth revisiting only if the game ever gains a second
+smell worth telling apart.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
