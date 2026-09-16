@@ -62,7 +62,18 @@ ACTIVITY_EMA_TAU_MS = 20.0
 # direction letter combines both).
 DIRECTION_TYPE_PATTERN = re.compile(r"^T[45]([abcd])")
 SENSORY_SCALE = 0.5
-MOTOR_EMA_TAU_MS = 150.0
+# Phase 3.5: this was 150ms, chosen without measurement back in Phase 3.
+# With a strong, fast-changing steering signal (LC10, Phase 3.4) and a
+# discrete grid where every turn immediately changes the true bearing, a
+# 150ms-lagged readout meant the motor decision still reflected the
+# *pre-turn* bearing for a good fraction of a tick, causing a systematic
+# overshoot-and-correct oscillation instead of convergence — found by
+# directly comparing trajectories at different tau values (a fly that
+# orbited at distance 8-12 from the target at 150ms converged to distance
+# 0-2 at 20ms, same everything else). Confirmed at the full-gameplay
+# level: 15ms took real apple-eating success from 0/24 episodes (150ms) to
+# 20/24 (real per-episode measurement, see docs/architecture-plan.md).
+MOTOR_EMA_TAU_MS = 15.0
 
 # Phase 3.2: goal direction via the real, published FC -> PFL3 -> DNa02
 # steering circuit (Westeinde et al.), checked against this exact dataset's
@@ -173,6 +184,33 @@ TURN_OFF_THRESH = 0.0001
 # do that subtraction for us.
 LC10_TYPE_PATTERN = re.compile(r"^LC10")
 VISUAL_SCALE = 1.0
+
+# Phase 3.5: real trajectories showed the fly making one lucky early
+# approach, then drifting away and wandering in a distant region for the
+# rest of the episode without ever correcting back. First hypothesis
+# tried: direction alone (however reliable in isolation, see LC10's t=88
+# above) doesn't guarantee net progress — so a reward-like "search
+# intensity" signal was built (rising when a fast/slow EMA crossover of
+# distance-to-target showed no progress, decaying when it did, scaling the
+# LC10 injection's magnitude — modeling real area-restricted-search
+# behavior, documented in Drosophila and much of the foraging-animal
+# literature as octopaminergic/dopaminergic modulation of search vigor).
+# It measurably changed behavior (search_intensity swung across its full
+# 0-4 range) but did *not* fix the drift — the actual bug was elsewhere.
+#
+# Root cause, found by testing MOTOR_EMA_TAU_MS directly: at the original
+# 150ms, the motor readout lagged far enough behind each turn that the
+# fly systematically overshot the target's true bearing every correction,
+# a classic feedback-lag oscillation — reducing it to 15ms (still an EMA,
+# not raw instantaneous spikes, just a much shorter one) let the readout
+# track the post-turn bearing almost immediately. This alone, with no
+# reward/vigor mechanism at all, took real gameplay from 2/24 episodes
+# eating an apple (no goal information) or 0/24 (goal information, 150ms
+# lag) to 20/24 (goal information, 15ms lag) — confirming the lag, not
+# signal reliability or search vigor, was the actual bottleneck all along.
+# The search_intensity mechanism was removed after this: measured to not
+# help and to slightly hurt once the lag was fixed (a fast, accurate
+# controller doesn't benefit from extra gain — it just overshoots more).
 
 
 class LifSimulation:
