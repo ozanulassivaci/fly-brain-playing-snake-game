@@ -691,6 +691,62 @@ precision apple-eating requires on final approach. A real, substantial,
 honestly-measured improvement in the fly's steering behavior, just not
 the one metric (apples eaten) most directly asked for.
 
+**Phase 3.5 — the actual bottleneck was motor lag, not signal quality
+or search vigor (done, apple-eating finally, measurably, reproducibly
+improved).** User pushback after Phase 3.4 was exactly right on two
+counts: surviving 60 seconds without hitting anything doesn't mean the
+fly is actually pursuing the apple (it could just be wandering in a
+way that avoids edges), and it was still failing to eat. Direct
+trajectory logging confirmed the first point: a representative episode
+showed the fly closing distance from 12 to 8 early on, then drifting
+steadily away to a final distance of 20+ and staying there — not
+oscillating near the target, genuinely leaving and never returning,
+despite LC10's isolated t=88 reliability.
+
+First attempt at a fix implemented the user's specific proposal: a
+persistent internal signal ("search_intensity") that rises when a
+fast (~0.3s) vs. slow (~2s) EMA crossover of real distance-to-target
+shows no progress and decays when it does, scaling the LC10
+injection's magnitude — modeling a real, published Drosophila/foraging-
+animal behavior (area-restricted search, normally attributed to
+octopaminergic/dopaminergic modulation of locomotor vigor; this
+dataset's subset has no identified PAM-cluster dopaminergic neurons to
+simulate directly, so this was implemented at the same systems level as
+existing knobs like GOAL_SCALE). It measurably worked as designed
+(search_intensity swung across its full 0-4 range in response to real
+stalled progress) but did not fix the drift-away trajectory.
+
+Root cause, found by testing `MOTOR_EMA_TAU_MS` directly rather than
+tuning the new mechanism further: at the original 150ms (chosen
+without measurement back in Phase 3), the motor readout lagged behind
+each turn long enough that the decoded decision still reflected the
+*pre-turn* bearing for a meaningful fraction of every tick — a classic
+feedback-lag oscillation, not a problem with the underlying signal.
+Direct trajectory comparison confirmed it starkly: the same scenario
+that orbited at distance 8-12 from the target at 150ms converged to
+distance 0-2 at 20ms, with no other change. Confirmed at the full
+gameplay level (24 episodes each, matching frontend/js/snake-game.js's
+real turning logic exactly): apple-eating went from 3/24 episodes (no
+goal information) or 0/24 (goal information, 150ms lag) to 17-21/24
+across several batches (goal information, 15-20ms lag) — the first
+configuration in this entire project to measurably and reproducibly
+beat having no goal information at all, and by a wide margin (roughly
+6-7x). `MOTOR_EMA_TAU_MS` is now 15ms. `search_intensity` was removed
+after this: measured to not help and to slightly hurt once the lag was
+fixed (a fast, accurate controller doesn't benefit from extra gain — it
+just overshoots more) — tried in good faith, tested rigorously, found
+unnecessary once the real bug was fixed, and removed rather than left
+in as dead weight, matching how every other non-performing addition in
+this project has been handled.
+
+Honest remaining picture: the fly now reliably approaches and eats the
+apple in most episodes (roughly 70-85% depending on the exact batch),
+a categorical change from every measurement in this project's history
+up through Phase 3.4. Death is now dominated by self-collision (the
+snake growing long enough to run into its own body — an expected
+consequence of actually succeeding at Snake, not a steering failure)
+rather than wall collision or aimless wandering.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
