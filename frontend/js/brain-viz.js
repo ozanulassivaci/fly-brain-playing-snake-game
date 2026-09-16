@@ -135,6 +135,10 @@ export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
     send({ type: 'sensory', ...values });
   }
 
+  function sendReward() {
+    send({ type: 'reward' });
+  }
+
   function render(nowSec) {
     scene.rotation.y = nowSec * 0.15;
     for (const key of Object.keys(clusters)) {
@@ -156,5 +160,5 @@ export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
     renderer.render(scene, camera);
   }
 
-  return { render, sendSensory };
+  return { render, sendSensory, sendReward };
 }

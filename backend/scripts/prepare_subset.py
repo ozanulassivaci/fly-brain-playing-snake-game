@@ -54,6 +54,13 @@ MOTION_PATTERN = re.compile(r"^(T4|T5|LC\d|LPLC\d|LT\d)")
 # 2. Smell only reaches behaviour through the mushroom body, which is
 # also why odour and dopamine are one feature rather than two.
 PN_PATTERN = re.compile(r"^[A-Z]+[0-9a-z]*_[a-z]*PN")
+# The lateral horn: olfaction's *innate* output, as opposed to the
+# mushroom body's learned one. This is the half that actually drives
+# odour-guided behaviour in a naive fly (PN->LH is 378,010 weight, LH->
+# descending neurons 22,810), and leaving it out was why the first odour
+# attempt had nowhere for the signal to go but the mushroom body, which
+# suppressed it.
+LH_PATTERN = re.compile(r"^LH")
 KC_PATTERN = re.compile(r"^KC")
 MBON_PATTERN = re.compile(r"^MBON")
 PAM_PATTERN = re.compile(r"^PAM")
@@ -172,6 +179,7 @@ def build_subset() -> pd.DataFrame:
     types = traced["type"].fillna("")
     olf_masks = {
         "pn": types.str.match(PN_PATTERN),
+        "lh": types.str.match(LH_PATTERN),
         "kc": types.str.match(KC_PATTERN),
         "mbon": types.str.match(MBON_PATTERN),
         "pam": types.str.match(PAM_PATTERN),

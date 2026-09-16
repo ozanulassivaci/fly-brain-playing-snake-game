@@ -36,16 +36,18 @@ const COLUMNS = [
     ],
   },
   {
-    // Phase 3.8: the olfactory / mushroom-body pathway. Present, real and
-    // genuinely driven — and measurably *not* steering: see
-    // docs/architecture-plan.md. Shown because it is part of the brain
-    // being simulated, not because it moves the snake.
+    // Phase 3.8: olfaction. PN carries the adapting odour signal (it
+    // encodes the *rise* in concentration, as real receptor neurons do),
+    // LH is the innate output that actually reaches behaviour and gates
+    // how readily the fly commits to a turn, and KC/MBON are the mushroom
+    // body — the learned half, which measurably suppresses rather than
+    // relays this signal. See docs/architecture-plan.md.
     title: 'Smell',
     nodes: [
       { key: 'pn_left', label: 'PN L', ref: 0.08 },
       { key: 'pn_right', label: 'PN R', ref: 0.08 },
+      { key: 'lh', label: 'LH', ref: 0.0015 },
       { key: 'kc', label: 'KC', ref: 0.0005 },
-      { key: 'mbon', label: 'MBON', ref: 0.0005 },
     ],
   },
   {

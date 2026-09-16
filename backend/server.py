@@ -43,6 +43,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
             if msg.get("type") == "sensory":
                 sim.inject_sensory(msg)
+            elif msg.get("type") == "reward":
+                sim.inject_reward()
     except WebSocketDisconnect:
         pass
     finally:

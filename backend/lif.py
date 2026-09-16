@@ -57,6 +57,7 @@ INHIB_GAIN = {
     "lc10": 400.0,
     "lplc1": 400.0,
     "pn": 400.0,
+    "lh": 400.0,
     "kc": 400.0,
     "mbon": 400.0,
     "pam": 400.0,
@@ -278,7 +279,64 @@ ESCAPE_GAIN = 0.01
 # the two antennae sample slightly different concentrations and the
 # difference steers the turn. The concentrations themselves are computed
 # from real geometry in snake-game.js, exactly as the apple bearing is.
-ODOUR_SCALE = 1.0
+ODOUR_SCALE = 30.0
+# Real olfactory neurons adapt: they report a *change* in concentration,
+# not its absolute level. That matters here because it is the whole
+# mechanism by which a walking fly finds a smell — concentration rising
+# means "the way I am going is working", falling means "it is not" — and
+# the first attempt at odour ignored it, injecting raw concentration
+# bilaterally and asking the mushroom body for a left/right steering
+# command it structurally cannot give (each Kenyon cell samples glomeruli
+# at random, so the bilateral difference does not survive; LH->DNa* is
+# only 66 weight). Subtracting a slowly-tracking baseline makes PN encode
+# the derivative instead, which is both what the real neurons do and what
+# the behaviour actually needs.
+ODOUR_ADAPT_TAU_MS = 1500.0
+
+# How the odour signal reaches behaviour: not as a turn direction, but as
+# a turn *suppressor*, read off the lateral horn. LH is olfaction's innate
+# output (PN->LH 378,010 weight; LH->descending neurons 22,810) as opposed
+# to the mushroom body's learned one, and it is bilateral and symmetric —
+# it raises both sides together rather than tilting them apart. Read as
+# common mode rather than difference, that is exactly the klinokinesis a
+# real fly uses: while the smell is getting stronger, hold your course;
+# when it stops getting stronger, start turning again and search. The
+# direction of any turn still comes entirely from the visual LC10/LPLC1
+# drives and their real ipsilateral wiring.
+#
+# Measured first with the mushroom body in this role, which failed for a
+# real reason worth keeping: PN responds beautifully (0.050 approaching
+# vs 0.00015 receding, a 300x separation from the adaptation above), but
+# MBON activity *drops* when odour rises — the mushroom body is a
+# sparse-coding layer with APL inhibition and genuinely inhibitory MBONs,
+# so it suppresses rather than relays. That is the learned-valence
+# pathway doing its job, not a bug, and it is the wrong half of olfaction
+# for innate food seeking.
+ODOUR_TURN_SUPPRESSION = 10000.0
+
+# Phase 3.9: dopamine. Eating an apple drives the PAM cluster — the real
+# dopaminergic reward neurons, 314 of them, which is where reward goes in
+# a fly and is a correction of Phase 1's version of this event, which
+# drove the descending neurons directly and corrupted steering at exactly
+# the moment the fly had just reached an apple.
+#
+# What is deliberately *not* here is mushroom-body plasticity. It was
+# built and measured first, because that is what dopamine actually does:
+# PAM projects onto the Kenyon cells (109,735 PAM->KC edges here), gating
+# the KC->MBON synapses (59,709 edges, 460,343 weight), and the canonical
+# Drosophila rule is that dopamine coinciding with recent KC activity
+# depresses them. It worked mechanically — a reward burst measurably
+# depressed the traced synapses by 22% — and made the fly slightly worse
+# (14 apples over ten minutes against 21 with the rule off), with the
+# plastic weights collapsing to their floor at 25%.
+#
+# That is not a tuning failure, it is the task: associative learning needs
+# something to associate. This game has exactly one odour, the apple, and
+# it is always rewarded. With no second cue to discriminate against, the
+# only thing the rule can do is depress everything uniformly, which is a
+# gain change rather than a memory. Worth revisiting if the game ever
+# gains a second smell worth telling apart.
+REWARD_PAM_DRIVE = 1.5
 
 # Phase 3.5: real trajectories showed the fly making one lucky early
 # approach, then drifting away and wandering in a distant region for the
@@ -333,6 +391,7 @@ class LifSimulation:
         self.weight_matrix = torch.sparse_coo_tensor(
             indices, edge_weight, size=(self.n, self.n), device=self.device
         ).coalesce()
+
 
         cluster = data["cluster"]
         neuron_type = data["neuron_type"]
@@ -389,6 +448,7 @@ class LifSimulation:
             "lc10": torch.from_numpy(is_lc10.astype(np.float32)).to(self.device),
             "lplc1": torch.from_numpy(is_lplc1.astype(np.float32)).to(self.device),
             "pn": torch.from_numpy((cluster == "pn").astype(np.float32)).to(self.device),
+            "lh": torch.from_numpy((cluster == "lh").astype(np.float32)).to(self.device),
             "kc": torch.from_numpy((cluster == "kc").astype(np.float32)).to(self.device),
             "mbon": torch.from_numpy((cluster == "mbon").astype(np.float32)).to(self.device),
             "pam": torch.from_numpy((cluster == "pam").astype(np.float32)).to(self.device),
@@ -461,6 +521,7 @@ class LifSimulation:
             "escape_right": self.escape_right_mask,
             "pn_left": self.pn_left_mask,
             "pn_right": self.pn_right_mask,
+            "lh": self.cluster_masks["lh"],
             "mbon": self.cluster_masks["mbon"],
             "kc": self.cluster_masks["kc"],
             "epg": self.cluster_masks["epg"],
@@ -495,12 +556,15 @@ class LifSimulation:
         self.drive_decay = float(np.exp(-DT_MS / DRIVE_DECAY_TAU_MS))
         self.activity_ema_decay = float(np.exp(-DT_MS / ACTIVITY_EMA_TAU_MS))
         self.motor_ema_decay = float(np.exp(-DT_MS / MOTOR_EMA_TAU_MS))
+        self.odour_adapt_decay = float(np.exp(-DT_MS / ODOUR_ADAPT_TAU_MS))
         self.refractory_steps = int(round(REFRACTORY_MS / DT_MS))
 
         self.dn_left_ema = 0.0
         self.dn_right_ema = 0.0
         self.escape_left_ema = 0.0
         self.escape_right_ema = 0.0
+        self.odour_baseline = None
+
         self.current_turn = "straight"
 
         self.v = torch.zeros(self.n, device=self.device)
@@ -554,14 +618,33 @@ class LifSimulation:
             )
             self.inject_visual_target(float(ego_bearing))
 
+    def inject_reward(self) -> None:
+        # Reward goes where reward goes in a fly: the PAM dopaminergic
+        # cluster. Phase 1's version of this event drove the descending
+        # neurons directly, which corrupted steering at exactly the wrong
+        # moment; this drives the neurons whose job it actually is.
+        self.external_drive += self.cluster_masks["pam"] * REWARD_PAM_DRIVE
+
     def inject_odour(self, odour_left: float, odour_right: float) -> None:
-        # Straight bilateral drive: whichever antenna smells more food gets
-        # the stronger input, and everything after that — PN -> Kenyon cell
-        # -> MBON -> descending neuron — is the connectome's own wiring.
-        if odour_left > 0:
-            self.external_drive += self.pn_left_mask * (odour_left * ODOUR_SCALE)
-        if odour_right > 0:
-            self.external_drive += self.pn_right_mask * (odour_right * ODOUR_SCALE)
+        # Adapting drive: PN sees how much the smell has strengthened since
+        # its recent baseline, not how strong it is. Getting closer to the
+        # apple therefore produces a real transient; sitting still at any
+        # distance, however strong the smell, produces nothing — which is
+        # how olfactory receptor neurons genuinely behave.
+        mean_conc = (odour_left + odour_right) / 2.0
+        if self.odour_baseline is None:
+            self.odour_baseline = mean_conc
+            return
+        rise = mean_conc - self.odour_baseline
+        self.odour_baseline += (mean_conc - self.odour_baseline) * (1 - self.odour_adapt_decay)
+        if rise <= 0:
+            return
+        # Split by antenna so the side nearer the source still gets more,
+        # even though what drives behaviour is the common-mode rise.
+        total = odour_left + odour_right
+        share_left = odour_left / total if total > 0 else 0.5
+        self.external_drive += self.pn_left_mask * (rise * share_left * 2.0 * ODOUR_SCALE)
+        self.external_drive += self.pn_right_mask * (rise * (1 - share_left) * 2.0 * ODOUR_SCALE)
 
     def inject_obstacle(self, threat_left: float, threat_right: float) -> None:
         # Contralateral by construction: a threat on the left drives the
@@ -619,15 +702,23 @@ class LifSimulation:
         diff = (self.dn_right_ema - self.dn_left_ema) + ESCAPE_GAIN * (
             self.escape_right_ema - self.escape_left_ema
         )
+        # Klinokinesis: while the mushroom body reports a strengthening
+        # smell, hold course; the threshold to commit to a turn rises with
+        # it. See ODOUR_TURN_SUPPRESSION.
+        # Measured against the resting rate the homeostasis holds every
+        # population at, so an unchanging smell (however strong) suppresses
+        # nothing and only a genuine rise does.
+        lh_rise = max(0.0, self.group_activity_ema.get("lh", 0.0) - TARGET_RATE)
+        turn_on = TURN_ON_THRESH * (1.0 + ODOUR_TURN_SUPPRESSION * lh_rise)
         # "more right-side steering-DN activity -> turn right" is a
         # consistent convention we chose, not something derivable from the
         # data alone (we don't have the actual sign of the DNa02-leg-motor
         # mapping) — but the *population* being read is now the real,
         # specifically identified steering DN family, not an arbitrary cut.
         if self.current_turn == "straight":
-            if diff > TURN_ON_THRESH:
+            if diff > turn_on:
                 self.current_turn = "right"
-            elif diff < -TURN_ON_THRESH:
+            elif diff < -turn_on:
                 self.current_turn = "left"
         elif abs(diff) < TURN_OFF_THRESH:
             self.current_turn = "straight"

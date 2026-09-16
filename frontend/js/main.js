@@ -100,7 +100,7 @@ async function main() {
   });
   const retina = createRetina();
 
-  snake = createSnakeGame();
+  snake = createSnakeGame({ onEat: () => brainViz.sendReward() });
   const screenTexture = new THREE.CanvasTexture(snake.canvas);
   screenTexture.colorSpace = THREE.SRGBColorSpace;
   screen.material = new THREE.MeshBasicMaterial({ map: screenTexture });
