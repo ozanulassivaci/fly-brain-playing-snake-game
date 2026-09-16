@@ -8,8 +8,8 @@
 // alongside the 3D panel's spike data) instead of a decorative shimmer.
 //
 // Reference scales below are display-only calibration: these populations
-// have wildly different baseline/active firing rates (FC/EPG can reach
-// ~0.03-0.13 spikes/neuron/step under goal/heading injection; DNa*-steering
+// have wildly different baseline/active firing rates (FC/EPG/LC10 can
+// reach ~0.03-0.13 spikes/neuron/step under injection; DNa*-steering
 // barely reaches ~2e-3) so each needs its own brightness scale to be visible
 // at all. This affects only how bright a node draws, never simulation
 // dynamics.
@@ -24,15 +24,27 @@ const COLUMNS = [
     ],
   },
   {
-    title: 'Central Cx',
+    // Phase 3.4: LC10, the real visual-pursuit pathway (Ribeiro et al.
+    // 2018) — see backend/lif.py's LC10_TYPE_PATTERN comment. Perfectly
+    // ipsilateral to the DNa* steering readout in this dataset (LC10a_L
+    // only ever reaches DNa_L, never DNa_R, and the mirror image), unlike
+    // the CX pathway's delicate goal-vs-heading comparison.
+    title: 'Visual',
     nodes: [
-      { key: 'epg', label: 'EPG (heading)', ref: 0.05 },
-      { key: 'fc', label: 'FC (goal)', ref: 0.05 },
-      { key: 'pfl', label: 'PFL (compare)', ref: 0.0015 },
+      { key: 'lc10_left', label: 'LC10 L', ref: 0.03 },
+      { key: 'lc10_right', label: 'LC10 R', ref: 0.03 },
     ],
   },
   {
-    title: 'Steering DN',
+    title: 'CX',
+    nodes: [
+      { key: 'epg', label: 'EPG', ref: 0.05 },
+      { key: 'fc', label: 'FC', ref: 0.05 },
+      { key: 'pfl', label: 'PFL', ref: 0.0015 },
+    ],
+  },
+  {
+    title: 'Steer DN',
     nodes: [
       { key: 'dna_left', label: 'DNa L', ref: 0.002 },
       { key: 'dna_right', label: 'DNa R', ref: 0.002 },
