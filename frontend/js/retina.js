@@ -49,10 +49,23 @@ export function createRetina() {
     }
 
     previous = current;
+    // Opponent (common-mode-subtracted) motion energy, not the raw
+    // correlations. Raw, these four are dominated by a large DC term that
+    // carries no direction information at all: when the scene barely
+    // changes between samples, current ~= previous, and then
+    // `sum(cur[i]*prev[i-1])` and `sum(cur[i-1]*prev[i])` are the *same
+    // sum* — measured live, all four came back byte-identical
+    // (0.13016532164177314) every sample, i.e. a constant excitatory load
+    // on all four T4/T5 populations and nothing else. Real fly motion
+    // vision reads T4/T5 the same way this does now: opposing directions
+    // are subtracted against each other downstream (the classic
+    // opponent/LPTC arrangement), so only genuine directional imbalance
+    // survives.
+    const mean = (right + left + down + up) / 4;
     // a/b/c/d <-> {right, left, down, up}: an arbitrary but fixed mapping
     // (the exact real a/b/c/d<->cardinal-direction correspondence for this
     // dataset isn't independently verified — see docs/architecture-plan.md).
-    return { a: right, b: left, c: down, d: up };
+    return { a: right - mean, b: left - mean, c: down - mean, d: up - mean };
   }
 
   return { sampleMotion };

@@ -23,11 +23,6 @@ REFRACTORY_MS = 3.0
 NOISE_STD = 0.1
 WEIGHT_SCALE = 2e-3
 DRIVE_DECAY_TAU_MS = 300.0
-EVENT_DRIVE = {
-    "move": {"motion": 0.6},
-    "eat": {"cx": 0.8, "dn": 0.8},
-    "collide": {"dn": 1.2},
-}
 
 # The real MaleCNS weight table has no excitatory/inhibitory sign (that
 # needs neurotransmitter-type data we didn't pull in Phase 0) — every
@@ -184,6 +179,22 @@ TURN_OFF_THRESH = 0.0001
 # do that subtraction for us.
 LC10_TYPE_PATTERN = re.compile(r"^LC10")
 VISUAL_SCALE = 1.0
+# Frontal acceptance zone: no turn command while the target sits within
+# this angle of straight ahead. Real flies do exactly this — the classic
+# Drosophila *fixation* response keeps a visual object in the frontal
+# field and only corrects once it drifts off-centre, rather than
+# demanding perfect alignment every instant. Here it is also what makes
+# the controller's precision match the body's: on a 4-direction grid the
+# best reachable heading can still be up to 45 degrees off the target, so
+# without a deadzone the fly gets a strong "turn!" command (sin 41 deg =
+# 0.66) even when it is already pointed as well as it possibly can be —
+# it turns, the next heading is ~49 degrees off the other way, and it
+# turns again. Traced live in the browser before adding this: the snake
+# cycled (-1,0) -> (0,1) -> (1,0) -> (0,-1) endlessly with the egocentric
+# bearing repeating the same four values (-138, -52, +41, +135 degrees),
+# none near zero — a limit cycle, which is precisely the "circles" this
+# demo kept drawing.
+VISUAL_DEADZONE = np.pi / 4
 
 # Phase 3.5: real trajectories showed the fly making one lucky early
 # approach, then drifting away and wandering in a distant region for the
@@ -342,6 +353,25 @@ class LifSimulation:
         self.group_counts = {name: max(1.0, float(mask.sum().item())) for name, mask in self.group_masks.items()}
         self.group_activity_ema = {name: 0.0 for name in self.group_masks}
 
+        # Phase 3.5: every per-population spike rate this class reads each
+        # step (7 homeostatic clusters + 11 display groups + 2 motor) used
+        # to be its own `(spikes * mask).sum().item()` — 20 separate
+        # GPU->CPU syncs per step, 400 per 20-step broadcast batch, each one
+        # stalling the pipeline. Measured: that was the dominant cost, and
+        # it kept the simulation *below real time* (0.71x), which in turn
+        # meant the fly's brain lived slower than the game it was playing.
+        # Stacking every mask into one matrix and reading all 20 rates with
+        # a single matmul + single sync measured 3x faster (to ~5x real
+        # time), which is what lets the game's wall-clock tick rate and the
+        # brain's simulated time actually correspond.
+        self._cluster_names = list(self.cluster_masks.keys())
+        self._group_names = list(self.group_masks.keys())
+        self._readout_matrix = torch.stack(
+            [self.cluster_masks[n] for n in self._cluster_names]
+            + [self.group_masks[n] for n in self._group_names]
+            + [self.dn_left_mask, self.dn_right_mask]
+        )
+
         self.leak_decay = float(np.exp(-DT_MS / LEAK_TAU_MS))
         self.drive_decay = float(np.exp(-DT_MS / DRIVE_DECAY_TAU_MS))
         self.activity_ema_decay = float(np.exp(-DT_MS / ACTIVITY_EMA_TAU_MS))
@@ -359,13 +389,25 @@ class LifSimulation:
         self.cluster_counts = {name: max(1.0, float(mask.sum().item())) for name, mask in self.cluster_masks.items()}
         self.cluster_activity_ema = {name: 0.0 for name in self.cluster_masks}
 
-    def inject_event(self, kind: str) -> None:
-        boosts = EVENT_DRIVE.get(kind)
-        if not boosts:
-            return
-        for cluster_name, amount in boosts.items():
-            self.external_drive += self.cluster_masks[cluster_name] * amount
-
+    # Phase 1 added blanket per-event drives ("move"/"eat"/"collide") back when
+    # the brain panel was decorative and just needed to flicker in time with
+    # the game. All of them are gone now, because once the brain actually
+    # steers they stop being harmless decoration:
+    #   - "move" fired every game tick (~7/s), dumping 0.6 into all 18,433
+    #     motion neurons, competing directly with the real visual steering
+    #     signal — measured live, removing it (with the retina DC fix in
+    #     frontend/js/retina.js) tripled the apple-eating rate. It modelled
+    #     nothing either: a real fly's self-motion cue is optic flow, which is
+    #     what the T4/T5 retina path already supplies.
+    #   - "eat"/"collide" injected 0.8-1.2 straight into the *descending
+    #     neurons*, i.e. the very population the steering decision is decoded
+    #     from, corrupting it for ~300ms (DRIVE_DECAY_TAU_MS) at exactly the
+    #     moment the fly had just reached an apple and needed to pick a new
+    #     heading. A real appetitive signal goes to reward circuitry (mushroom
+    #     body / PAM dopaminergic neurons), not to steering DNs — and this
+    #     subset contains no such neurons to send it to.
+    # The brain panel still lights up, from real spikes rather than injected
+    # flashes.
     def inject_sensory(self, values: dict) -> None:
         for letter in ("a", "b", "c", "d"):
             amount = values.get(letter, 0.0)
@@ -395,6 +437,8 @@ class LifSimulation:
         # LC10_TYPE_PATTERN) — this still gives zero drive when the target
         # is dead ahead or directly behind and maximum drive when it's
         # squarely to one side, without an arbitrary discontinuity at 0.
+        if abs(ego_bearing) <= VISUAL_DEADZONE:
+            return
         right_amount = max(0.0, float(np.sin(ego_bearing))) * VISUAL_SCALE
         left_amount = max(0.0, float(-np.sin(ego_bearing))) * VISUAL_SCALE
         if right_amount:
@@ -418,9 +462,7 @@ class LifSimulation:
         weights_t = torch.from_numpy(weights.astype(np.float32)).to(self.device)
         self.external_drive += weights_t @ self.heading_ring_matrix
 
-    def _update_motor(self) -> None:
-        left_rate = (self.spikes * self.dn_left_mask).sum().item() / self.dn_left_count
-        right_rate = (self.spikes * self.dn_right_mask).sum().item() / self.dn_right_count
+    def _update_motor(self, left_rate: float, right_rate: float) -> None:
         self.dn_left_ema = self.dn_left_ema * self.motor_ema_decay + left_rate * (1 - self.motor_ema_decay)
         self.dn_right_ema = self.dn_right_ema * self.motor_ema_decay + right_rate * (1 - self.motor_ema_decay)
 
@@ -465,17 +507,23 @@ class LifSimulation:
         )
         self.refractory.clamp_(min=0)
 
-        for name, mask in self.cluster_masks.items():
-            rate = (self.spikes * mask).sum().item() / self.cluster_counts[name]
+        # One matmul, one GPU->CPU sync for all 20 population rates (see the
+        # _readout_matrix comment in __init__ for why this matters).
+        counts = self._readout_matrix @ self.spikes
+        rates = counts.tolist()
+
+        n_clusters = len(self._cluster_names)
+        for i, name in enumerate(self._cluster_names):
+            rate = rates[i] / self.cluster_counts[name]
             self.cluster_activity_ema[name] = (
                 self.cluster_activity_ema[name] * self.activity_ema_decay + rate * (1 - self.activity_ema_decay)
             )
-        for name, mask in self.group_masks.items():
-            rate = (self.spikes * mask).sum().item() / self.group_counts[name]
+        for j, name in enumerate(self._group_names):
+            rate = rates[n_clusters + j] / self.group_counts[name]
             self.group_activity_ema[name] = (
                 self.group_activity_ema[name] * self.activity_ema_decay + rate * (1 - self.activity_ema_decay)
             )
-        self._update_motor()
+        self._update_motor(rates[-2] / self.dn_left_count, rates[-1] / self.dn_right_count)
         return self.spikes
 
     def step_batch(self, n_steps: int) -> list[int]:

@@ -131,10 +131,6 @@ export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
     }
   }
 
-  function pulse(kind) {
-    send({ type: 'event', kind });
-  }
-
   function sendSensory(values) {
     send({ type: 'sensory', ...values });
   }
@@ -160,5 +156,5 @@ export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
     renderer.render(scene, camera);
   }
 
-  return { render, pulse, sendSensory };
+  return { render, sendSensory };
 }

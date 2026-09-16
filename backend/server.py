@@ -41,9 +41,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if msg.get("type") == "event":
-                sim.inject_event(msg.get("kind", ""))
-            elif msg.get("type") == "sensory":
+            if msg.get("type") == "sensory":
                 sim.inject_sensory(msg)
     except WebSocketDisconnect:
         pass
@@ -53,6 +51,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 async def simulation_loop():
+    # The sleep below has to account for how long the batch itself took,
+    # or simulated time falls behind wall-clock time: each batch advances
+    # exactly STEPS_PER_BROADCAST ms of simulated brain time, so sleeping a
+    # further BROADCAST_INTERVAL_S *after* the compute made the brain run at
+    # 20/(20+compute) of real speed — measured at ~0.42x before the
+    # single-sync readout optimization in lif.py. A fly whose brain runs at
+    # half the speed of the game it is playing reacts to every event a tick
+    # late, which is not a property of the connectome, just of our loop.
+    loop = asyncio.get_running_loop()
+    next_deadline = loop.time()
     while True:
         spiked = sim.step_batch(STEPS_PER_BROADCAST)
         if clients:
@@ -72,7 +80,16 @@ async def simulation_loop():
                     dead.append(ws)
             for ws in dead:
                 clients.discard(ws)
-        await asyncio.sleep(BROADCAST_INTERVAL_S)
+        next_deadline += BROADCAST_INTERVAL_S
+        delay = next_deadline - loop.time()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        else:
+            # Fell behind (GPU hiccup, or a machine too slow for this
+            # subset): don't try to catch up by spinning, just resync so
+            # simulated time keeps tracking wall-clock time going forward.
+            next_deadline = loop.time()
+            await asyncio.sleep(0)
 
 
 @app.on_event("startup")

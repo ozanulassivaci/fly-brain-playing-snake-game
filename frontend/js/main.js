@@ -10,6 +10,7 @@ import { createRetina } from './retina.js';
 
 const overlay = document.getElementById('overlay');
 const viewport = document.getElementById('viewport');
+const scoreEl = document.getElementById('score');
 const fail = makeFailOverlay(overlay);
 
 const TARGET_FLY_HEIGHT = 0.38; // meters, sized relative to the cabinet's control panel
@@ -99,11 +100,7 @@ async function main() {
   });
   const retina = createRetina();
 
-  snake = createSnakeGame({
-    onMove: () => brainViz.pulse('move'),
-    onEat: () => brainViz.pulse('eat'),
-    onCollide: () => brainViz.pulse('collide'),
-  });
+  snake = createSnakeGame();
   const screenTexture = new THREE.CanvasTexture(snake.canvas);
   screenTexture.colorSpace = THREE.SRGBColorSpace;
   screen.material = new THREE.MeshBasicMaterial({ map: screenTexture });
@@ -163,6 +160,9 @@ async function main() {
     screenTexture.needsUpdate = true;
     brainViz.render(now);
     decisionPanel.render();
+
+    const s = snake.getScore();
+    scoreEl.textContent = `apples ${s.score}  ·  best ${s.bestScore}`;
 
     controls.update();
     renderer.render(scene, camera);

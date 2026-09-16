@@ -20,13 +20,16 @@ function rotateRight([dx, dy]) {
   return [-dy, dx];
 }
 
-export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, onEat, onCollide } = {}) {
+export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, onCollide } = {}) {
   const canvas = document.createElement('canvas');
   canvas.width = cols * cellSize;
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, currentMotorTurn, apple, alive, tickAcc, restartAcc;
+  let snake, dir, currentMotorTurn, apple, alive, tickAcc, restartAcc, score;
+  // Survives reset() so a death doesn't erase what the fly has managed —
+  // the run-to-run record is the number worth watching.
+  let bestScore = 0;
 
   function reset() {
     snake = [
@@ -39,6 +42,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
+    score = 0;
     spawnApple();
   }
 
@@ -67,12 +71,13 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
 
     snake.unshift(head);
     if (head.x === apple.x && head.y === apple.y) {
+      score++;
+      bestScore = Math.max(bestScore, score);
       onEat?.();
       spawnApple();
     } else {
       snake.pop();
     }
-    onMove?.();
   }
 
   function draw() {
@@ -86,6 +91,11 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
       ctx.fillStyle = i === 0 ? '#7CFC9A' : '#3fae63';
       ctx.fillRect(s.x * cellSize + 1, s.y * cellSize + 1, cellSize - 2, cellSize - 2);
     });
+
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.font = `${Math.floor(cellSize * 0.7)}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`apples ${score}   best ${bestScore}`, 6, cellSize);
 
     if (!alive) {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -133,5 +143,9 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onMove, o
   }
 
   reset();
-  return { canvas, update, getDirection, applyTurn, getHeadingAngle, getGoalAngle };
+  function getScore() {
+    return { score, bestScore, alive };
+  }
+
+  return { canvas, update, getDirection, applyTurn, getHeadingAngle, getGoalAngle, getScore };
 }
