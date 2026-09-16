@@ -635,6 +635,62 @@ new mechanism (online learning across repeated episodes) not yet
 designed or attempted, and is a reasonable candidate for a Phase 4 if
 this project continues.
 
+**Phase 3.4 — LC10 direct visual pursuit, the anatomically correct
+circuit for "sees it, flies straight at it" (done, real and large
+behavioral effect, on a different metric than expected).** User's
+framing directly identified a real conceptual error: how a fly finds
+food (a directly visible object) is not the same behavior as central
+complex path integration (FC/EPG/PFL, used since Phase 3.2) — that
+system is for returning to a *remembered* location (e.g. a nest), not
+steering toward something currently in view. Real-time visual target
+pursuit in Drosophila is a separate, well-characterized circuit: LC10,
+published as driving directed courtship pursuit (Ribeiro et al. 2018 —
+a male fly steers toward a visually detected female via LC10
+projecting to DNp11).
+
+Checked directly against this dataset before using it (not assumed):
+every LC10 subtype present (a, b, c-1, c-2, d, e — 960 neurons total)
+projects to DNa* steering neurons with a *perfectly* ipsilateral,
+zero-crosstalk pattern — e.g. LC10a_L -> DNa_L is 377 weight, LC10a_L ->
+DNa_R is exactly 0, and the mirror image for LC10a_R. This is
+qualitatively different from every CX-pathway measurement all project:
+no delicate goal-vs-heading subtraction is needed, just a direct,
+dedicated, real wire from "target detected on this side" to "steer
+toward this side." DNa10 (the single strongest LC10 target) is already
+inside the existing DNa* readout, so no new readout population was
+needed. LC10 has no real retinotopic position label in this dataset
+(unlike FC's column or EPG's glomerulus), so injection uses the
+*egocentric* bearing (target angle relative to current heading,
+computed from the already-sent allocentric bearing/heading) split
+smoothly into LC10's real left/right populations — visual detection is
+inherently egocentric, unlike the CX pathway's shared-world-frame
+comparison.
+
+Measured far more reliable than anything found with the CX pathway:
+12/12 correctly-signed trials in both directions (target right vs.
+left), t=88 (compare the CX circuit's best result, t~1-2), signal-to-
+noise ~17-20x — the cleanest, least ambiguous real signal found in this
+entire project.
+
+**Gameplay result — real, large, and reproducible, but on survival
+rather than apple-eating.** Across three independent 24-episode
+batches: episodes surviving the full 60 seconds with zero collisions
+went from 0/24 (no goal information, every batch) to 12/24, 13/24, and
+15/24 with the LC10 circuit active — a dramatic, consistently
+reproducible effect, unlike every other gameplay measurement in this
+project's history. Apple-eating itself and closest-approach-distance
+were also checked but showed smaller, less consistent improvements
+across the same batches (e.g. closest-approach mean 5.38 vs. 7.42 in
+one batch, 4.96 vs. 5.33 in the replication). The interpretation: a
+strong, correctly-signed, always-on steering bias makes the snake
+continuously curve back toward the apple's general direction instead
+of ever traveling straight into a wall, which is exactly what the
+survival metric captures — but the same coarse, oscillating,
+90-degree-grid-turn approach doesn't reliably achieve the exact-cell
+precision apple-eating requires on final approach. A real, substantial,
+honestly-measured improvement in the fly's steering behavior, just not
+the one metric (apples eaten) most directly asked for.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
