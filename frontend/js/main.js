@@ -138,10 +138,13 @@ async function main() {
     retinaAcc += dt;
     if (retinaAcc >= RETINA_SAMPLE_INTERVAL) {
       retinaAcc = 0;
+      const threat = snake.getThreat();
       brainViz.sendSensory({
         ...retina.sampleMotion(snake.canvas),
         bearing: snake.getGoalAngle(),
         heading: snake.getHeadingAngle(),
+        threat_left: threat.left,
+        threat_right: threat.right,
       });
     }
 

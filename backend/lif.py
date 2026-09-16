@@ -47,7 +47,16 @@ TARGET_RATE = 0.0003  # target fraction of neurons spiking per 1ms step
 # while motion/dn landed close to it — CX's local recurrent excitation is
 # evidently much stronger, so its proportional controller needs a bigger
 # correction for the same size of error).
-INHIB_GAIN = {"motion": 40.0, "cx": 400.0, "dn": 40.0, "fc": 400.0, "pfl": 400.0, "epg": 400.0, "lc10": 400.0}
+INHIB_GAIN = {
+    "motion": 40.0,
+    "cx": 400.0,
+    "dn": 40.0,
+    "fc": 400.0,
+    "pfl": 400.0,
+    "epg": 400.0,
+    "lc10": 400.0,
+    "lplc1": 400.0,
+}
 ACTIVITY_EMA_TAU_MS = 20.0
 
 # Phase 3: real per-neuron structure used for sensory-in/motor-out, not made
@@ -196,6 +205,61 @@ VISUAL_SCALE = 1.0
 # demo kept drawing.
 VISUAL_DEADZONE = np.pi / 4
 
+# Phase 3.7: obstacle avoidance via LPLC1, the real loom-sensitive visual
+# projection neuron. Once the fly started actually eating, the snake grew,
+# and it died almost immediately afterwards — it had no channel at all
+# through which its own lengthening body could be perceived, so it curled
+# straight into itself. Real flies do have one: looming-sensitive lobula
+# columnar cells driving both escape and avoidance steering.
+#
+# Checked against this dataset before choosing LPLC1 (not assumed): of the
+# loom-associated types present, LPLC2 / LC4 / LC6 / LC16 / LC11 have
+# *zero* connectivity to DNa* steering neurons — they feed the giant-fiber
+# takeoff escape instead, which matches the real division of labour.
+# LPLC1 (134 neurons, 68 L / 66 R, all cholinergic) does both: it reaches
+# the classic escape descending neurons (DNp03 3602, DNp35 3194, DNp06
+# 2773, DNp11 1041) *and* DNa07 (398) — a steering DN already inside this
+# project's readout — and its DNa projection is perfectly ipsilateral
+# (LPLC1_L -> DNa_L 272, LPLC1_L -> DNa_R 0, mirrored on the other side),
+# the same clean structure LC10 has.
+#
+# Because that projection is ipsilateral and driving DNa_L turns the fly
+# left (the arbitrary-but-consistent convention documented at
+# _update_motor), a threat on the *left* is injected into LPLC1_*right*,
+# so the turn goes away from it. That side assignment is ours, exactly as
+# the DNa-to-turn convention already is; everything downstream of the
+# injection is real anatomy. Approach (LC10) and avoidance (LPLC1) drives
+# then simply sum at the descending neurons, which is how competing
+# steering drives resolve in a real brain too.
+LPLC1_TYPE_PATTERN = re.compile(r"^LPLC1$")
+OBSTACLE_SCALE = 2.5
+
+# Reading the avoidance signal off DNa alone did not work, and the reason
+# is real rather than a tuning failure: only ~4% of LPLC1's descending
+# output reaches DNa07 (398 weight). The other ~96% goes to the escape
+# descending neurons below (DNp03 1988+1614, DNp35 1750+1444, DNp06
+# 1604+1169, DNp11 542+499, DNp103 390+608 — all perfectly ipsilateral,
+# zero crosstalk, same clean structure as LC10). In a real fly that output
+# triggers *escape*: takeoff, or a backward lunge. Snake has no such
+# action — the body can only go left, right or straight — so the fly's
+# strongest collision response had almost nowhere to express itself, and
+# the apple-approach drive (measured ~0.006 at DNa, vs 0.0016 from the
+# LPLC1 route) simply outvoted it every time.
+#
+# So the escape command is read out separately and mapped onto the only
+# evasive action this body has: a hard turn away. That mapping is ours and
+# is the same kind of choice as the DNa-to-turn convention; the pathway,
+# its weights and its lateralisation are the connectome's.
+ESCAPE_DN_TYPE_PATTERN = re.compile(r"^DNp(03|06|11|35|103)$")
+# Sized to put the two drives on equal footing rather than picked by feel:
+# a close threat drives the escape readout to ~0.18, while the apple drive
+# reaches ~0.006 at DNa, so 0.01 makes neither able to simply steamroll the
+# other. Swept empirically too — higher values do stop the fly dying almost
+# entirely (at 0.4, 12/12 episodes survive the full 60s) but it then hovers
+# safely in open space and never commits to an apple, which is the classic
+# approach-avoidance failure and not what we want.
+ESCAPE_GAIN = 0.01
+
 # Phase 3.5: real trajectories showed the fly making one lucky early
 # approach, then drifting away and wandering in a distant region for the
 # rest of the episode without ever correcting back. First hypothesis
@@ -288,8 +352,13 @@ class LifSimulation:
         # T4/T5 neurons stayed lumped in with it) crush the real optic-flow
         # signal Phase 3's turning already depends on.
         is_lc10 = np.array([bool(LC10_TYPE_PATTERN.match(t)) for t in neuron_type])
+        # LPLC1 gets its own homeostatic pool for the same reason LC10 does:
+        # a sustained looming injection would otherwise drag the whole
+        # motion-cluster average up and have that cluster's inhibition
+        # crush the very signal being injected.
+        is_lplc1 = np.array([bool(LPLC1_TYPE_PATTERN.match(t)) for t in neuron_type])
         cx_other = (cluster == "cx") & ~is_fc & ~is_pfl & ~is_epg
-        motion_other = (cluster == "motion") & ~is_lc10
+        motion_other = (cluster == "motion") & ~is_lc10 & ~is_lplc1
         self.cluster_masks = {
             "motion": torch.from_numpy(motion_other.astype(np.float32)).to(self.device),
             "cx": torch.from_numpy(cx_other.astype(np.float32)).to(self.device),
@@ -298,6 +367,7 @@ class LifSimulation:
             "pfl": torch.from_numpy(is_pfl.astype(np.float32)).to(self.device),
             "epg": torch.from_numpy(is_epg.astype(np.float32)).to(self.device),
             "lc10": torch.from_numpy(is_lc10.astype(np.float32)).to(self.device),
+            "lplc1": torch.from_numpy(is_lplc1.astype(np.float32)).to(self.device),
         }
 
         fc_column = data["fc_column"]
@@ -327,6 +397,18 @@ class LifSimulation:
 
         self.lc10_left_mask = torch.from_numpy((is_lc10 & (soma_side == "L")).astype(np.float32)).to(self.device)
         self.lc10_right_mask = torch.from_numpy((is_lc10 & (soma_side == "R")).astype(np.float32)).to(self.device)
+        self.lplc1_left_mask = torch.from_numpy((is_lplc1 & (soma_side == "L")).astype(np.float32)).to(self.device)
+        self.lplc1_right_mask = torch.from_numpy((is_lplc1 & (soma_side == "R")).astype(np.float32)).to(self.device)
+
+        is_escape_dn = np.array([bool(ESCAPE_DN_TYPE_PATTERN.match(t)) for t in neuron_type])
+        self.escape_left_mask = torch.from_numpy((is_escape_dn & (soma_side == "L")).astype(np.float32)).to(
+            self.device
+        )
+        self.escape_right_mask = torch.from_numpy((is_escape_dn & (soma_side == "R")).astype(np.float32)).to(
+            self.device
+        )
+        self.escape_left_count = max(1.0, float(self.escape_left_mask.sum().item()))
+        self.escape_right_count = max(1.0, float(self.escape_right_mask.sum().item()))
 
         # Extra named populations tracked only for the frontend decision-flow
         # panel (not used to drive any dynamics beyond the homeostatic split
@@ -344,6 +426,10 @@ class LifSimulation:
             "motion_d": self.direction_masks["d"],
             "lc10_left": self.lc10_left_mask,
             "lc10_right": self.lc10_right_mask,
+            "lplc1_left": self.lplc1_left_mask,
+            "lplc1_right": self.lplc1_right_mask,
+            "escape_left": self.escape_left_mask,
+            "escape_right": self.escape_right_mask,
             "epg": self.cluster_masks["epg"],
             "fc": self.cluster_masks["fc"],
             "pfl": self.cluster_masks["pfl"],
@@ -369,7 +455,7 @@ class LifSimulation:
         self._readout_matrix = torch.stack(
             [self.cluster_masks[n] for n in self._cluster_names]
             + [self.group_masks[n] for n in self._group_names]
-            + [self.dn_left_mask, self.dn_right_mask]
+            + [self.dn_left_mask, self.dn_right_mask, self.escape_left_mask, self.escape_right_mask]
         )
 
         self.leak_decay = float(np.exp(-DT_MS / LEAK_TAU_MS))
@@ -380,6 +466,8 @@ class LifSimulation:
 
         self.dn_left_ema = 0.0
         self.dn_right_ema = 0.0
+        self.escape_left_ema = 0.0
+        self.escape_right_ema = 0.0
         self.current_turn = "straight"
 
         self.v = torch.zeros(self.n, device=self.device)
@@ -423,11 +511,24 @@ class LifSimulation:
             self.inject_goal(values["bearing"])
         if "heading" in values:
             self.inject_heading(values["heading"])
+        if "threat_left" in values or "threat_right" in values:
+            self.inject_obstacle(float(values.get("threat_left", 0.0)), float(values.get("threat_right", 0.0)))
         if "bearing" in values and "heading" in values:
             ego_bearing = np.arctan2(
                 np.sin(values["bearing"] - values["heading"]), np.cos(values["bearing"] - values["heading"])
             )
             self.inject_visual_target(float(ego_bearing))
+
+    def inject_obstacle(self, threat_left: float, threat_right: float) -> None:
+        # Contralateral by construction: a threat on the left drives the
+        # right-hand LPLC1 population, whose real ipsilateral projection to
+        # DNa turns the fly right, away from it. See the LPLC1_TYPE_PATTERN
+        # comment for why that side assignment is ours and everything after
+        # the injection is the connectome's.
+        if threat_left > 0:
+            self.external_drive += self.lplc1_right_mask * (threat_left * OBSTACLE_SCALE)
+        if threat_right > 0:
+            self.external_drive += self.lplc1_left_mask * (threat_right * OBSTACLE_SCALE)
 
     def inject_visual_target(self, ego_bearing: float) -> None:
         # Egocentric: 0 = target straight ahead, +-pi/2 = directly to the
@@ -462,11 +563,18 @@ class LifSimulation:
         weights_t = torch.from_numpy(weights.astype(np.float32)).to(self.device)
         self.external_drive += weights_t @ self.heading_ring_matrix
 
-    def _update_motor(self, left_rate: float, right_rate: float) -> None:
+    def _update_motor(self, left_rate: float, right_rate: float, esc_left: float, esc_right: float) -> None:
         self.dn_left_ema = self.dn_left_ema * self.motor_ema_decay + left_rate * (1 - self.motor_ema_decay)
         self.dn_right_ema = self.dn_right_ema * self.motor_ema_decay + right_rate * (1 - self.motor_ema_decay)
+        self.escape_left_ema = self.escape_left_ema * self.motor_ema_decay + esc_left * (1 - self.motor_ema_decay)
+        self.escape_right_ema = self.escape_right_ema * self.motor_ema_decay + esc_right * (1 - self.motor_ema_decay)
 
-        diff = self.dn_right_ema - self.dn_left_ema
+        # Approach (DNa, driven by LC10) and escape (DNp, driven by LPLC1)
+        # summed into one steering decision — competing drives resolving at
+        # the descending level, which is where they meet in a real brain too.
+        diff = (self.dn_right_ema - self.dn_left_ema) + ESCAPE_GAIN * (
+            self.escape_right_ema - self.escape_left_ema
+        )
         # "more right-side steering-DN activity -> turn right" is a
         # consistent convention we chose, not something derivable from the
         # data alone (we don't have the actual sign of the DNa02-leg-motor
@@ -523,7 +631,12 @@ class LifSimulation:
             self.group_activity_ema[name] = (
                 self.group_activity_ema[name] * self.activity_ema_decay + rate * (1 - self.activity_ema_decay)
             )
-        self._update_motor(rates[-2] / self.dn_left_count, rates[-1] / self.dn_right_count)
+        self._update_motor(
+            rates[-4] / self.dn_left_count,
+            rates[-3] / self.dn_right_count,
+            rates[-2] / self.escape_left_count,
+            rates[-1] / self.escape_right_count,
+        )
         return self.spikes
 
     def step_batch(self, n_steps: int) -> list[int]:

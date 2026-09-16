@@ -1,5 +1,6 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
+const THREAT_RADIUS = 6; // cells the looming channel can see (see getThreat)
 // Brain-controlled only (Phase 3) — no keyboard input. Earlier attempts to
 // fix a spinning-in-circles bug worked around it in this game layer
 // (edge-triggering, then a fixed turn cooldown) instead of fixing the real
@@ -142,10 +143,65 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
     return Math.atan2(apple.y - head.y, apple.x - head.x);
   }
 
+  // Obstacle proximity in the left and right halves of the visual field —
+  // the sensory quantity a real fly's looming pathway (LPLC1) reports,
+  // computed here rather than seen, because retina.js downsamples a 20x20
+  // board to 8x8 and a one-cell body segment simply does not survive that.
+  // Same arrangement as the apple bearing: the geometry is measured
+  // honestly here, the *decision* stays with the real LPLC1 -> DN synapses
+  // in the connectome (see backend/lif.py's inject_obstacle). Segment 1 is
+  // skipped because the neck always trails the head and is never avoidable.
+  function getThreat() {
+    const head = snake[0];
+    const [hx, hy] = dir;
+    const rx = -hy, // egocentric "right" = rotateRight(dir)
+      ry = hx;
+    let left = 0,
+      right = 0;
+
+    const consider = (ox, oy) => {
+      const dx = ox - head.x,
+        dy = oy - head.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 === 0 || d2 > THREAT_RADIUS * THREAT_RADIUS) return;
+      const d = Math.sqrt(d2);
+      const forward = (dx * hx + dy * hy) / d; // -1 behind .. +1 ahead
+      const lateral = (dx * rx + dy * ry) / d; // -1 left .. +1 right
+      // Weighted by where the body could actually end up: straight ahead is
+      // the worst (it gets hit by doing nothing), the sides matter because
+      // one 90-degree turn reaches them, and directly behind is
+      // unreachable, so it counts for nothing. Restricting this to the
+      // frontal sector was the first thing tried and it missed the fatal
+      // case entirely: after one turn the snake's own body sits *beside*
+      // the head, invisible to a forward-only field, and the next turn
+      // drives straight into it. Real lobula columnar cells see nearly
+      // panoramically, so the broad field is also the more faithful one.
+      // 1/d, not 1/d^2: with the steeper falloff only an already-adjacent
+      // cell registered at all (measured in a logged death — the threat
+      // sat at 0.06 for seven ticks and then jumped to 0.56 one tick
+      // before the collision, far too late for a 150ms tick plus the motor
+      // EMA and turn threshold to act on). Real looming responses build up
+      // over the whole approach rather than firing at the last instant.
+      const reachable = (1 + forward) / 2;
+      const weight = reachable / d;
+      right += weight * (0.5 + lateral / 2);
+      left += weight * (0.5 - lateral / 2);
+    };
+
+    for (let i = 2; i < snake.length; i++) consider(snake[i].x, snake[i].y);
+    for (let k = -THREAT_RADIUS; k <= THREAT_RADIUS; k++) {
+      consider(-1, head.y + k);
+      consider(cols, head.y + k);
+      consider(head.x + k, -1);
+      consider(head.x + k, rows);
+    }
+    return { left, right };
+  }
+
   reset();
   function getScore() {
     return { score, bestScore, alive };
   }
 
-  return { canvas, update, getDirection, applyTurn, getHeadingAngle, getGoalAngle, getScore };
+  return { canvas, update, getDirection, applyTurn, getHeadingAngle, getGoalAngle, getThreat, getScore };
 }
