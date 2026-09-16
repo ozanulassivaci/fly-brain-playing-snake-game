@@ -747,6 +747,82 @@ snake growing long enough to run into its own body — an expected
 consequence of actually succeeding at Snake, not a steering failure)
 rather than wall collision or aimless wandering.
 
+**Phase 3.6 — the harness was lying; four real defects found by
+instrumenting the live browser (done).** User testing kept showing the
+snake circling and never eating while the Python harness reported
+17-21/24 episodes succeeding. The harness was not a faithful model of
+the app, and chasing neuroscience explanations for a discrepancy that
+turned out to be engineering cost a lot of this project's time. Lesson
+recorded here deliberately: **when the user's observation and the test
+disagree, instrument the thing the user is actually running.** Four
+separate defects, all found that way:
+
+1. *The brain ran slower than the game.* `step()` performed 20 separate
+   GPU→CPU syncs per step (one `.item()` per cluster/group/motor
+   readout — 400 per broadcast batch), and `server.py` slept
+   `BROADCAST_INTERVAL_S` *after* that compute rather than accounting
+   for it. Measured 0.42x real time: the fly's brain lived at under
+   half the speed of the game it was playing, so every reaction landed
+   a tick late. The harness advanced simulated and game time together
+   1:1, so it never saw this. Fixed by stacking all 20 population masks
+   into one matrix (single matmul, single sync — measured 3x faster,
+   ~5.8x real time) and giving the server loop a real deadline;
+   verified over the wire at exactly 1.00x.
+2. *The controller demanded precision the body cannot deliver.* Traced
+   live: the snake cycled `(-1,0) → (0,1) → (1,0) → (0,-1)` endlessly
+   with the egocentric bearing repeating the same four values (−138°,
+   −52°, +41°, +135°), never near zero. On a 4-direction grid the best
+   reachable heading can still be 45° off, yet `sin(41°) = 0.66` still
+   commands a hard turn — so the fly turned *away* from its own best
+   heading, forever. That limit cycle is precisely the "circles" being
+   reported. Fixed with a frontal acceptance zone (`VISUAL_DEADZONE`,
+   45°): no turn command while the target is roughly ahead — which is
+   also what real Drosophila fixation behaviour does.
+3. *The retina fed the brain pure DC.* When the scene barely changes
+   between samples, `Σ cur[i]·prev[i−1]` and `Σ cur[i−1]·prev[i]` are
+   the *same sum* — measured live, all four T4/T5 channels came back
+   byte-identical (0.13016532164177314) every single sample: a constant
+   excitatory load carrying zero directional information. Now reports
+   opponent (common-mode-subtracted) motion energy, matching how real
+   T4/T5 is read downstream.
+4. *Phase 1's decorative event pulses were competing with the real
+   signal.* `move` fired every game tick, dumping 0.6 into all 18,433
+   motion neurons; `eat`/`collide` injected 0.8-1.2 straight into the
+   descending neurons the steering decision is decoded from, corrupting
+   it for ~300ms at exactly the moment the fly had just reached an apple
+   and needed a new heading. Suppressing them live tripled the eating
+   rate; all three are now removed.
+
+Also added an apples/best score readout (sidebar + game screen) — the
+instrument that made measuring any of this in the real app possible.
+
+**Measured in the real browser, end to end: 0 apples in 150s before,
+5-7 apples in 200s after.** The fly now approaches and eats; it still
+usually dies within a few seconds of eating (the new apple can spawn
+behind it, and a 90°-per-tick body has no graceful way to reverse), so
+`best` sits at 1. That is the honest current state.
+
+### Answers to two recurring questions
+
+- *Would downloading the full 166,700-neuron connectome help?* Not for
+  any bottleneck found so far — every one of them was engineering
+  (loop timing, control deadband, a degenerate sensory channel, leftover
+  decorative drives), and the LC10→DNa circuit measured t=88 reliability
+  in isolation with the subset we already have. It would also make
+  performance ~7x worse, on a simulation that was until now running
+  below real time. What the full connectome *would* add that this subset
+  genuinely lacks: the olfactory pathway (real flies find food primarily
+  by smell), and the mushroom body with its PAM dopaminergic reward
+  neurons — the only way to implement a "reward/hunger" signal out of
+  real neurons rather than as a systems-level parameter.
+- *Would a reward/"happiness" signal help?* Tried and measured (see
+  Phase 3.5): a progress-tracking search-intensity signal worked exactly
+  as designed and did not fix the drift, because the real cause was
+  elsewhere. It is a real mechanism (area-restricted search) and worth
+  revisiting if a future phase adds the PAM neurons to implement it
+  properly, but on the evidence it is not what stands between this fly
+  and the apple.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
