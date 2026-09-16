@@ -823,6 +823,87 @@ behind it, and a 90°-per-tick body has no graceful way to reverse), so
   properly, but on the evidence it is not what stands between this fly
   and the apple.
 
+**Phase 3.7 — collision avoidance via LPLC1 (done, partial).** Once the
+fly started eating, the snake grew and it died almost immediately after
+— it had no channel at all through which its own lengthening body could
+be perceived. Real flies do: looming-sensitive lobula columnar cells.
+Checked before choosing one: LPLC2 / LC4 / LC6 / LC16 / LC11 have *zero*
+connectivity to DNa* steering neurons (they feed the giant-fibre takeoff
+escape instead — the real division of labour), while **LPLC1** (134
+neurons, all cholinergic, already in the subset) reaches both the escape
+descending neurons (DNp03 1988+1614, DNp35 1750+1444, DNp06 1604+1169,
+DNp11, DNp103) *and* DNa07, every one perfectly ipsilateral with zero
+crosstalk.
+
+Reading avoidance off DNa alone did not work, for a real reason: only
+~4% of LPLC1's descending output reaches DNa07. The other ~96% goes to
+escape neurons, whose real meaning is *takeoff* — an action Snake does
+not have, so the fly's strongest collision response had nowhere to go
+and the apple drive (≈0.006 at DNa vs 0.0016 from LPLC1) outvoted it
+every time. The escape command is now read out separately and mapped
+onto the only evasive action this body has, a hard turn away.
+
+Two further corrections came from measurement, not theory: the threat
+field was initially frontal-only, which missed the fatal case entirely
+(after one turn the snake's own body sits *beside* the head, invisible
+to a forward field, and the next turn drives into it), and it used
+1/d², which in a logged death sat at 0.06 for seven ticks then jumped to
+0.56 one tick before impact — far too late for a 150ms tick plus the
+motor EMA to act on. Now panoramic, weighted by where the body can
+actually end up, 1/d over 6 cells.
+
+`ESCAPE_GAIN` is sized to put the two drives on equal footing (close
+threat drives escape to ~0.18, apple drive reaches ~0.006). Result
+across 14 episodes: **wall deaths eliminated (6 → 0)** and some episodes
+now survive the full 60s at the same apple rate. Higher gains stop
+almost all deaths (12/12 survive at 0.4) but the fly then hovers safely
+and never commits to an apple — the classic approach-avoidance failure.
+**Self-collision remains the dominant death and best score is still 1:
+not solved.**
+
+**Phase 3.8 — olfaction and dopamine: added, measured, and honestly not
+what steers this fly (done).** Requested on the reasonable grounds that
+real flies find food by smell and that dopamine rises on approach. Both
+turned out to be one circuit, and the whole of it was already on disk —
+the "subset" was only ever our filter, so nothing needed downloading.
+
+Added: antennal-lobe projection neurons (541, 273 L / 273 R) → Kenyon
+cells (4050) → MBON (90) → DNa* steering at 1145 weight (the same order
+as LC10's ~970 into the same readout), plus PAM (314 dopaminergic
+neurons) exactly where it sits in the animal — on the KC→MBON synapses —
+and APL. Subset 22,853 → 27,850 neurons, still 2.8x real time. The 2635
+ORNs are excluded because not one has a soma position (0/2635): they are
+in the antenna, outside the reconstructed volume, so odour enters
+bilaterally at the PN stage instead, which is the odour representation
+the rest of the brain actually receives.
+
+**Measured result: odour drives PN hard (0.05-0.08) and propagates
+through KC and MBON, but produces no reliable lateralised steering
+signal — DNa shifts ~0, inconsistent in sign across trials.** This is
+anatomy, not tuning:
+- The mushroom body deliberately *discards* spatial information. Each
+  Kenyon cell samples glomeruli at random; its output answers "is this
+  odour good or bad", not "which way". A bilateral difference does not
+  survive that mixing.
+- The lateral horn, olfaction's other output, agrees: PN→LH is 378,010
+  weight and LH→any DN is 22,810, but **LH→DNa\* is just 66**, and barely
+  lateralised (23/15, 6/22).
+- Which matches real behaviour: odour tracking in a *walking* fly
+  modulates walking speed and turn rate (klinokinesis), it does not
+  command a direction. This body has no speed to modulate — only left,
+  right and straight.
+
+The same finding disposes of dopamine as a fix: PAM's role is plasticity
+at KC→MBON, on a pathway measured not to reach steering. Implementing
+mushroom-body learning would faithfully shape a signal that does not move
+the snake. Worth doing for authenticity some day; not worth doing to make
+the fly eat.
+
+Both are kept — they are real, active parts of the brain being simulated
+and now have their own "Smell" column in the decision panel — but the
+panel comment and this document both say plainly that they are not what
+drives the fly.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
