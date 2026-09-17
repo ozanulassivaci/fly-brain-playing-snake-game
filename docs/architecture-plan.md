@@ -1315,6 +1315,133 @@ now it is a rate that a heading integrator smooths anyway. Not yet
 re-tested; it is the fourth instance of a setting that may have become
 wrong when what reads it changed.
 
+## Phase 3.14 — the slalom is a control oscillation, and T4/T5 went nowhere
+
+Reported from playing it: most deaths are now self-collisions, the fly
+travels in a slalom, and once it has eaten six or seven apples the body is
+long enough that the weave runs into itself. Also still the occasional
+straight-into-a-wall.
+
+### The slalom, measured
+
+Sixty episodes of 1000 ticks, recording the commanded turn rate every tick:
+
+- the sign of the command reverses every ~6.7 ticks
+- same-direction runs peak sharply at 4-5 ticks (53.6% of all runs)
+- median run 5 ticks, so the **oscillation period is 10 ticks = 1.50s**
+
+A pure integrator with delayed proportional feedback oscillates at roughly
+four times the loop delay. The loop delay here is injected current decaying
+over 300ms, plus a 150ms motor average, plus the 150ms tick — call it
+375ms, and 4 x 375ms = 1.50s. The measurement and the model agree to the
+tick. **The slalom is not something the fly decides; it is what a delayed
+feedback loop does.**
+
+And the self-collision lengths line up with the report exactly: 6, 6, 6, 6,
+7, 7, then eight of them at length 8, then 9, 9, 9, 10, 11, 11, 11, 11. A
+5-tick half-period weave has a wavelength around 10 cells, so a body of 8
+is the first that can re-enter it.
+
+### Shortening the delay works, and the fly's own trick does not
+
+Cutting the loop delay shortens the period exactly as predicted, and the
+self-collisions go with it — but the drive decay also sets how firmly the
+fly commits to any turn, so cutting that costs wall safety:
+
+| drive / motor window | period | self | wall | apples |
+| --- | --- | --- | --- | --- |
+| 300 / 150 | 10 ticks | 15 | 25 | 133 |
+| 300 / 60 | 8 | 8 | 32 | 139 |
+| 150 / 60 | 6 | **0** | 40 | 113 |
+| 80 / 40 | 4 | **0** | 40 | 33 |
+
+A real fly does not solve this by being faster. It adds rate feedback: the
+**optomotor reflex**, where self-generated wide-field motion opposes an
+unintended turn. That is derivative damping, which kills the oscillation
+without weakening the pull toward the apple — and it needs the lobula
+plate, which was missing.
+
+### T4/T5 had no route to steering at all
+
+Checked after Phase 3.13, because the premotor network was in and the
+motion pathway still did nothing: **T4/T5 → DNa\* is 0 weight, and T4/T5 →
+LAL/PS/AOTU/VES is also 0.** T4/T5 are early cells that project to the
+lobula plate tangential cells, and not one of those matched
+`MOTION_PATTERN`. So the retina has been driving 13,581 neurons — 42% of
+the entire subset — into a dead end since Phase 3, lighting up the brain
+panel and reaching the motor readout with nothing whatsoever.
+
+The missing stage is 350 neurons (HS 6, VS 18, H1/H2 4, LPT 302, Am1 2):
+
+| | weight |
+| --- | --- |
+| T4/T5 → it | 589,447 |
+| it → LAL/PS/AOTU/VES | 34,002 |
+| it → DNa* direct | 1,186 (mostly ipsilateral) |
+
+Twice the obstacle pathway's direct route and six times its premotor one.
+Cost: 350 neurons and 118k edges; still 1.00x over the wire.
+
+### Reafferent optomotor damping: measured twice, rejected twice
+
+With the pathway connected, the fly was given the visual consequence of its
+own turning — the board is world-fixed and never rotates, so its retina
+cannot produce this itself.
+
+**First attempt, bilateral**, on the reasoning that a yaw sweeps the whole
+panorama one way. The oscillation period did not move from 10 ticks at any
+drive strength up to 30. The reason is the same one that killed the LPLC2
+attempt in Phase 3.13: a bilaterally symmetric input to a left-minus-right
+readout cancels exactly.
+
+**Second attempt, antisymmetric**, which is the correct physics — turning
+right, the right eye sees back-to-front and the left eye front-to-back, and
+T4/T5a is the front-to-back subtype against T4/T5b's back-to-front (Maisak
+et al. 2013). The two eyes see *opposite* eye-centric directions and that
+asymmetry is the whole content of the signal. Period still 10 ticks at
+every strength up to 100, apples flat. Removed from the code; the negative
+result lives here instead.
+
+So the optomotor route does not carry damping in this model, for the same
+structural reason as everything else that enters through a thin pathway:
+the perturbation that survives the homeostatic pools to reach 16 DNa
+neurons a side is too small to matter.
+
+### What did work
+
+`MOTOR_EMA_TAU_MS` 150ms → 40ms — the fourth time a constant in this file
+has been right, then wrong, then re-derived. Phase 3.11 measured 150ms as
+necessary against a *threshold* readout with a 2.7x weaker signal; it is
+now a rate that the heading integrator smooths anyway, so the window was
+only adding lag. Sixty episodes of 700 ticks, three noise seeds:
+
+| window | apples | best in one life | self-collisions | period |
+| --- | --- | --- | --- | --- |
+| **150ms** | **199** | **7** | **25** | **10 ticks** |
+| 100ms | 208 | 8 | 24 | 8 |
+| 60ms | 215 | 11 | 20 | 8 |
+| **40ms** | **252** | **12** | **18** | **6** |
+| 25ms | 217 | 12 | 11 | 6 |
+| 15ms | 200 | 13 | 14 | 8 |
+| 8ms | 177 | 7 | 17 | 8 |
+
+**+27% apples, best in one life 7 → 12, self-collisions 25 → 18.** The
+period tracks the window as the oscillation model says it should, and
+below 40ms the old noise argument reasserts itself.
+
+`TURN_RATE_GAIN` was re-swept at the new window and stays at 310. 450
+scores more apples (269 against 252) but takes self-collisions from 18 to
+40; the extra apples are inside the spread and the self-collisions are the
+reported problem.
+
+Live in the browser: 68 apples in 180 seconds, against 45 for the previous
+build.
+
+Self-collisions are reduced, not solved. What the sweep shows is that they
+can be driven to zero by shortening the loop further — at a cost in wall
+deaths that is worse than the gain. Splitting that trade needs the two
+threats to stop competing for one scalar, which is still the open problem.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
