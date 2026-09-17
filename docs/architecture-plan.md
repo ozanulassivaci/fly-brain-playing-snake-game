@@ -1058,6 +1058,118 @@ when it was set and became wrong when something else changed —
 `MOTOR_EMA_TAU_MS` twice, the turn policy once. Worth re-testing rejected
 options whenever the thing that made them fail has moved.
 
+## Phase 3.12 — the fly gets a body: an integrated heading instead of 90° turns
+
+The complaint this phase started from: away from the board edges the fly
+slaloms, and around an apple it locks into a wide orbit — at one point a
+9×9 box with the apple in the middle. Plus a direct question: is the
+brain's decision out of sync with the game?
+
+### Two fixes proposed from first principles, both measured, both rejected
+
+**A — graded turn rate as a permission gate.** Report how far past its
+commit threshold the steering signal is, and let a strong command turn on
+consecutive ticks while a weak one keeps the rate limit. Measured **2
+apples against 26** over ten seeds. Logging the strength against the real
+steering error showed the premise was simply false:
+
+| \|ego\| | mean strength | correct turn | wrong turn | straight |
+| --- | --- | --- | --- | --- |
+| 0-29° | 0.90 | 0.34 | **0.65** | 0.01 |
+| 30-59° | 0.88 | 0.52 | 0.44 | 0.04 |
+| 60-89° | 0.76 | **0.80** | 0.10 | 0.10 |
+| 90-119° | 0.54 | 0.79 | 0.09 | 0.12 |
+| 120-149° | 0.54 | 0.62 | 0.22 | 0.17 |
+| 150-179° | 0.28 | 0.36 | 0.48 | 0.16 |
+
+The strength was *anti*-correlated with the error: strongest when already
+aligned, weakest with the apple behind — the opposite of what the fix
+needed. LC10 drive goes as sin(ego), so the rear is where it is weakest,
+and dividing by an odour-modulated threshold scrambled what was left.
+
+**B — phase-lock sensory sampling to the game tick.** Sampling ran on a
+free 100ms timer against a 150ms tick: not harmonic, so the age of the
+data a decision was made on drifted between 0 and 100ms. Real, and worth
+fixing, but on its own it measured *worse* (10-15 apples against 26): with
+the drive decaying over 300ms, less frequent sampling meant a weaker drive.
+It is kept, because the winning configuration below includes it.
+
+Also swept and rejected: `DRIVE_DECAY_TAU_MS` (300 → 120/60/30, with and
+without gain compensation; 60ms cuts the command's release time from 860ms
+to 140ms but the fly then flies straight into walls, 10/10), asymmetric
+hysteresis (`TURN_OFF` at 2-3× `TURN_ON`: 28-29 against 26, inside the
+noise), and raising the obstacle gain (below).
+
+### The actual defect: a 90° body executing an analog command
+
+Every configuration shared one signature — with the apple within 60° of
+straight ahead the fly turned correctly about as often as wrongly
+(0.49-0.54) and went straight on 2-4% of ticks. That is not a tuning
+failure. With the apple 30° to the right, "straight" is the correct move
+on a grid, and a controller whose only outputs are two 90° turns cannot
+express it. It turns, overshoots by 60°, is told to turn back, and
+overshoots again: the slalom. At larger errors the same effect closes
+into the orbit.
+
+So the fix is not in the brain. It is the missing physics between a
+steering command and a grid: **the fly now carries a continuous heading**.
+The descending-neuron left-right difference is integrated into it as a
+turn velocity (capped at 90°/tick, so a fatal reversal cannot happen in
+one step), and the snake moves along whichever cardinal that heading
+points nearest to. Nothing plans a route; the connectome still decides
+everything. A weak command rotates the heading slightly and never crosses
+into the next cardinal — which is how "go straight" finally became
+expressible.
+
+Two supporting changes fall out of it:
+
+- **`VISUAL_SCALE` 30 → 10.** For a rate to mean anything the readout has
+  to be out of saturation. Measured against a held bearing:
+
+  | bearing off-axis | 0° | 15° | 30° | 45° | 60° | 90° | 120° | 150° | 180° |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | scale 30 | .0002 | .0093 | .0171 | .0194 | .0195 | .0200 | .0194 | .0168 | .0000 |
+  | scale 10 | .0001 | .0031 | .0061 | .0087 | .0099 | .0123 | .0104 | .0060 | .0000 |
+
+  At 30 the signal is flat from 30° out — an on/off command. At 10 it
+  grades to 90°, and a 15° error still sits 5× over the noise floor
+  (p90 0.0006).
+
+- **The 45° frontal deadzone is gone.** It was never about LC10, which
+  tiles the frontal field in a real fly; it was a patch for the grid
+  quantisation the heading now removes. With it gone, steering is correct
+  0.81 of the time with the apple 120-180° behind, against 0.51 with it.
+
+### Result
+
+A methodological note first: the LIF noise is not seeded, and run-to-run
+spread on ten episodes turned out to be wider than most of the effects
+being chased — the same configuration measured 25 and 33 apples on
+consecutive runs. Two earlier comparisons in this phase were re-run under
+fixed noise seeds before any of the above was believed. Forty episodes of
+500 ticks per configuration, twenty game seeds × two noise seeds:
+
+| | total apples | best in one life |
+| --- | --- | --- |
+| rate-limited 90° turns | 83 | 5, 5 |
+| **integrated heading** | **112** | **8, 8** |
+| integrated heading, obstacle gain ×4 | 83 | 7, 5 |
+| integrated heading, obstacle gain ×12 | 47 | 4, 7 |
+
+The old build never once passed five apples in a life across all forty
+episodes; the new one reached eight under both noise seeds and repeated
+its total exactly (56/56), where the old one swung 50/33. Raising the
+obstacle gain on top of it is harmful, so LPLC1 keeps its scale.
+
+Confirmed live in the browser over 150 seconds rather than only in the
+harness: ten lives, an apple every 1.5-5 seconds, five apples in a life
+four separate times.
+
+Wall collisions are now the dominant death (53 of 60 short episodes). The
+fly flies straighter, so the obstacle pathway has less slack to save it by
+accident — and a higher gain is not the answer. That is the next thing to
+work on.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
