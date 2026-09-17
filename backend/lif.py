@@ -72,18 +72,29 @@ ACTIVITY_EMA_TAU_MS = 20.0
 # direction letter combines both).
 DIRECTION_TYPE_PATTERN = re.compile(r"^T[45]([abcd])")
 SENSORY_SCALE = 0.5
-# Phase 3.5: this was 150ms, chosen without measurement back in Phase 3.
-# With a strong, fast-changing steering signal (LC10, Phase 3.4) and a
-# discrete grid where every turn immediately changes the true bearing, a
-# 150ms-lagged readout meant the motor decision still reflected the
-# *pre-turn* bearing for a good fraction of a tick, causing a systematic
-# overshoot-and-correct oscillation instead of convergence — found by
-# directly comparing trajectories at different tau values (a fly that
-# orbited at distance 8-12 from the target at 150ms converged to distance
-# 0-2 at 20ms, same everything else). Confirmed at the full-gameplay
-# level: 15ms took real apple-eating success from 0/24 episodes (150ms) to
-# 20/24 (real per-episode measurement, see docs/architecture-plan.md).
-MOTOR_EMA_TAU_MS = 15.0
+# How long the steering readout is averaged over, and the second knob in
+# this file to be right, then wrong, then right again as the rest changed.
+#
+# Phase 3.5 cut it from 150ms to 15ms because the lag was making the fly
+# act on its pre-turn bearing and orbit the apple — true at the time,
+# when a held decision was applied on *every* tick. Phase 3.10 rate-limited
+# turning to one per two ticks, which removes most of that lag penalty and
+# leaves the other side of the trade-off exposed: only 16 neurons per side
+# feed this readout, so a 15ms window is extremely noisy. Measured
+# directly, signal (apple 50 degrees off) against noise (no input at all):
+#
+#     tau    noise p90    signal median    correctly signed
+#      15     0.00154        0.00104             89%
+#      40     0.00123        0.00144             97%
+#      80     0.00072        0.00138             98%
+#     150     0.00061        0.00135            100%
+#
+# At 15ms the noise p90 is *above* the signal median — the fly was turning
+# on noise as often as on the apple, which is exactly the aimless circling
+# that kept being reported. At 150ms the signal is correctly signed every
+# time. With turning rate-limited, the lag costs little and the
+# signal-to-noise is worth far more.
+MOTOR_EMA_TAU_MS = 150.0
 
 # Phase 3.2: goal direction via the real, published FC -> PFL3 -> DNa02
 # steering circuit (Westeinde et al.), checked against this exact dataset's
@@ -162,8 +173,13 @@ HEADING_SIGMA = 1.5  # bump width in ring positions (matches GOAL_SIGMA: same-si
 # a median of ~1.6 ticks and a max of ~6.8 ticks — short enough that plain
 # once-per-tick turning (frontend/js/snake-game.js) no longer needs a
 # game-layer cooldown/edge-trigger workaround to avoid visible spinning.
-TURN_ON_THRESH = 0.0001
-TURN_OFF_THRESH = 0.0001
+# Set above the measured noise floor of the readout rather than at the old
+# weak-signal noise level. At the previous 0.0001 the no-input |diff|
+# crossed the threshold 42% of the time, so the fly was committing to
+# turns on noise; 0.003 sits above the 150ms noise p90 (0.00061) and below
+# the driven signal, so only a real bearing error turns it.
+TURN_ON_THRESH = 0.003
+TURN_OFF_THRESH = 0.003
 
 # Phase 3.4: direct visual pursuit via LC10, the real, published
 # target-pursuit visual projection neuron (Ribeiro et al. 2018 — LC10a
@@ -193,7 +209,14 @@ TURN_OFF_THRESH = 0.0001
 # comparison — there is no PFL-style comparator neuron in this pathway to
 # do that subtraction for us.
 LC10_TYPE_PATTERN = re.compile(r"^LC10")
-VISUAL_SCALE = 1.0
+# Raised from 1.0 once the threshold above was lifted clear of the noise:
+# the drive has to be strong enough that a real bearing error clears that
+# higher bar. Swept together with the threshold and the readout window —
+# 42-52 apples per 14 episodes against 39 for the old low-signal,
+# low-threshold combination, and far more importantly the trajectories
+# become aimed rather than a biased random walk (measured: distance to the
+# apple now falls 8-7-6-5-4-3-2-1 instead of wandering).
+VISUAL_SCALE = 30.0
 # Frontal acceptance zone: no turn command while the target sits within
 # this angle of straight ahead. Real flies do exactly this — the classic
 # Drosophila *fixation* response keeps a visual object in the frontal
