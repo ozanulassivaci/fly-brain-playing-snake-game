@@ -95,12 +95,31 @@ async function main() {
   // and brainViz's onMotor callback reference each other.
   let snake;
   const brainViz = await createBrainViz(brainCanvas, {
-    onMotor: (turn) => snake?.applyTurn(turn),
+    onMotor: (turn, rate) => snake?.applyTurn(rate),
     onGroups: (groups, turn) => decisionPanel.update(groups, turn),
   });
   const retina = createRetina();
 
-  snake = createSnakeGame({ onEat: () => brainViz.sendReward() });
+  // Called once per game tick (snake-game.js's onTick), not on a timer of
+  // its own — see the note there.
+  function sendSensory() {
+    const threat = snake.getThreat();
+    const odour = snake.getOdour();
+    brainViz.sendSensory({
+      ...retina.sampleMotion(snake.canvas),
+      bearing: snake.getGoalAngle(),
+      heading: snake.getHeadingAngle(),
+      threat_left: threat.left,
+      threat_right: threat.right,
+      odour_left: odour.left,
+      odour_right: odour.right,
+    });
+  }
+
+  snake = createSnakeGame({
+    onEat: () => brainViz.sendReward(),
+    onTick: sendSensory,
+  });
   const screenTexture = new THREE.CanvasTexture(snake.canvas);
   screenTexture.colorSpace = THREE.SRGBColorSpace;
   screen.material = new THREE.MeshBasicMaterial({ map: screenTexture });
@@ -126,30 +145,12 @@ async function main() {
   }
 
   const _targetWorld = new THREE.Vector3();
-  const RETINA_SAMPLE_INTERVAL = 0.1;
-  let retinaAcc = 0;
   let last = performance.now() / 1000;
   function frame(nowMs) {
     requestAnimationFrame(frame);
     const now = nowMs / 1000;
     const dt = Math.min(0.1, now - last);
     last = now;
-
-    retinaAcc += dt;
-    if (retinaAcc >= RETINA_SAMPLE_INTERVAL) {
-      retinaAcc = 0;
-      const threat = snake.getThreat();
-      const odour = snake.getOdour();
-      brainViz.sendSensory({
-        ...retina.sampleMotion(snake.canvas),
-        bearing: snake.getGoalAngle(),
-        heading: snake.getHeadingAngle(),
-        threat_left: threat.left,
-        threat_right: threat.right,
-        odour_left: odour.left,
-        odour_right: odour.right,
-      });
-    }
 
     const dir = snake.getDirection();
     if (dir[0] !== lastDir[0] || dir[1] !== lastDir[1]) {

@@ -70,7 +70,7 @@ async def simulation_loop():
                 {
                     "type": "spikes",
                     "indices": spiked,
-                    "motor": {"turn": sim.read_motor()},
+                    "motor": {"turn": sim.read_motor(), "rate": sim.read_turn_rate()},
                     "groups": sim.read_groups(),
                 }
             )

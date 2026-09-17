@@ -114,7 +114,7 @@ export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
       }
       if (msg.type === 'spikes') {
         for (const idx of msg.indices) flashGlobalIndex(idx);
-        if (msg.motor) onMotor?.(msg.motor.turn);
+        if (msg.motor) onMotor?.(msg.motor.turn, msg.motor.rate ?? 0);
         if (msg.groups) onGroups?.(msg.groups, msg.motor?.turn);
       }
     });

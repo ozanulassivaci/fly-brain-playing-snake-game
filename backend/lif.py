@@ -209,30 +209,42 @@ TURN_OFF_THRESH = 0.003
 # comparison — there is no PFL-style comparator neuron in this pathway to
 # do that subtraction for us.
 LC10_TYPE_PATTERN = re.compile(r"^LC10")
-# Raised from 1.0 once the threshold above was lifted clear of the noise:
-# the drive has to be strong enough that a real bearing error clears that
-# higher bar. Swept together with the threshold and the readout window —
-# 42-52 apples per 14 episodes against 39 for the old low-signal,
-# low-threshold combination, and far more importantly the trajectories
-# become aimed rather than a biased random walk (measured: distance to the
-# apple now falls 8-7-6-5-4-3-2-1 instead of wandering).
-VISUAL_SCALE = 30.0
-# Frontal acceptance zone: no turn command while the target sits within
-# this angle of straight ahead. Real flies do exactly this — the classic
-# Drosophila *fixation* response keeps a visual object in the frontal
-# field and only corrects once it drifts off-centre, rather than
-# demanding perfect alignment every instant. Here it is also what makes
-# the controller's precision match the body's: on a 4-direction grid the
-# best reachable heading can still be up to 45 degrees off the target, so
-# without a deadzone the fly gets a strong "turn!" command (sin 41 deg =
-# 0.66) even when it is already pointed as well as it possibly can be —
-# it turns, the next heading is ~49 degrees off the other way, and it
-# turns again. Traced live in the browser before adding this: the snake
-# cycled (-1,0) -> (0,1) -> (1,0) -> (0,-1) endlessly with the egocentric
-# bearing repeating the same four values (-138, -52, +41, +135 degrees),
-# none near zero — a limit cycle, which is precisely the "circles" this
-# demo kept drawing.
-VISUAL_DEADZONE = np.pi / 4
+# Raised from 1.0 in Phase 3.11 once the turn threshold was lifted clear of
+# the noise, then cut back to 10.0 in Phase 3.12 — the third knob in this
+# file to be right, then wrong, then right again as what reads it changed.
+# At 30 the drive was so strong that the steering readout saturated: the
+# signed left-right difference, measured against a held bearing with the
+# deadzone off, was
+#
+#     bearing off-axis   0     15    30    45    60    90   120   150   180
+#     scale 30       0.0002 .0093 .0171 .0194 .0195 .0200 .0194 .0168 .0000
+#     scale 10       0.0001 .0031 .0061 .0087 .0099 .0123 .0104 .0060 .0000
+#
+# i.e. at 30 the readout is flat from 30 degrees out — an on/off command
+# carrying no information about *how far* off the target is, confirmed in
+# play (median signed difference varied only 0.0106-0.0124 across every
+# bearing bin). At 10 it grades smoothly all the way out to 90 degrees and
+# a 15-degree error still sits 5x above the readout's own noise floor
+# (p90 0.0006). The turn command only became a rate worth grading once
+# frontend/js/snake-game.js started integrating it into a heading rather
+# than thresholding it, which is why this is only now the right value.
+VISUAL_SCALE = 10.0
+# Phase 3.6 added a 45-degree frontal deadzone here — no turn command while
+# the target sat within that angle of straight ahead — and Phase 3.12
+# removed it. It was never about LC10: real LC10 tiles the whole visual
+# field, front included, and has no hole in the middle. It was a patch for
+# the *body*: on a 4-direction grid the best reachable heading can be 45
+# degrees off the target, so a fly that insisted on perfect alignment got a
+# strong "turn!" command (sin 41 deg = 0.66) while already pointed as well
+# as it could be, turned, ended up 49 degrees off the other way, and turned
+# again — a limit cycle, traced live as the snake looping (-1,0) -> (0,1)
+# -> (1,0) -> (0,-1) with the egocentric bearing repeating -138, -52, +41,
+# +135 and never nearing zero. The continuous heading in
+# frontend/js/snake-game.js removes the quantisation that caused it, so the
+# patch can go: with it gone the fly steers correctly 0.81 of the time when
+# the apple is 120-180 degrees behind it, against 0.51 with the deadzone in
+# place. Keeping a blind spot pointed exactly where the food is was costing
+# more than it saved.
 
 # Phase 3.7: obstacle avoidance via LPLC1, the real loom-sensitive visual
 # projection neuron. Once the fly started actually eating, the snake grew,
@@ -589,6 +601,7 @@ class LifSimulation:
         self.odour_baseline = None
 
         self.current_turn = "straight"
+        self.turn_diff = 0.0
 
         self.v = torch.zeros(self.n, device=self.device)
         self.external_drive = torch.zeros(self.n, device=self.device)
@@ -688,8 +701,6 @@ class LifSimulation:
         # LC10_TYPE_PATTERN) — this still gives zero drive when the target
         # is dead ahead or directly behind and maximum drive when it's
         # squarely to one side, without an arbitrary discontinuity at 0.
-        if abs(ego_bearing) <= VISUAL_DEADZONE:
-            return
         right_amount = max(0.0, float(np.sin(ego_bearing))) * VISUAL_SCALE
         left_amount = max(0.0, float(-np.sin(ego_bearing))) * VISUAL_SCALE
         if right_amount:
@@ -746,8 +757,30 @@ class LifSimulation:
         elif abs(diff) < TURN_OFF_THRESH:
             self.current_turn = "straight"
 
+        # Phase 3.12: the signed difference itself, published alongside the
+        # thresholded left/right/straight above, because a real descending
+        # neuron pair encodes turn *velocity* in its firing-rate difference
+        # rather than a discrete choice of direction. The thresholded form
+        # is what the decision panel displays; this is what actually steers
+        # (frontend/js/snake-game.js integrates it into a heading).
+        #
+        # A first attempt reported a normalised 0-1 "strength" relative to
+        # turn_on instead, so that a strong command could turn twice in a
+        # row. It measured far worse (2 apples against 26 over 10 seeds),
+        # and logging showed why: dividing by an odour-modulated threshold
+        # scrambled the quantity, and the strength that came out was
+        # *anti*-correlated with the steering error — 0.90 mean with the
+        # apple within 30 degrees, 0.28 with it 150-180 degrees behind. The
+        # raw difference, once VISUAL_SCALE came down out of saturation, is
+        # the graded quantity that attempt was reaching for.
+        self.turn_diff = diff
+
     def read_motor(self) -> str:
         return self.current_turn
+
+    def read_turn_rate(self) -> float:
+        """Signed right-minus-left steering difference: a turn velocity."""
+        return self.turn_diff
 
     def read_groups(self) -> dict:
         return dict(self.group_activity_ema)

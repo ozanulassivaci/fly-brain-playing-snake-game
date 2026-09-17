@@ -1,41 +1,67 @@
 const TICK_SECONDS = 0.15;
 const RESTART_DELAY_SECONDS = 1.5;
-const MIN_TURN_TICKS = 2; // see the note above; measured, not guessed
 const THREAT_RADIUS = 6; // cells the looming channel can see (see getThreat)
 const ANTENNA_OFFSET = 0.6; // cells either side of the head (see getOdour)
 // Brain-controlled only (Phase 3) — no keyboard input.
 //
-// How a held "left"/"right" decision becomes grid moves turns out to
-// matter more than almost anything else in this project. The backend's
-// hysteresis (backend/lif.py) now holds a decision for a median of ~1.6
-// ticks. Turning on *every* tick of that hold therefore means typically
-// two 90-degree turns back to back — a 180-degree reversal — which is
-// exactly the circling that kept being reported, and with a short snake
-// it is also a self-collision.
+// Phase 3.12: the fly has a *body*. It carries a continuous heading, the
+// descending-neuron signal is integrated into that heading as a turn
+// velocity, and the snake moves along whichever cardinal direction the
+// heading currently points nearest to. Nothing here plans a route or looks
+// at where the apple is; all of that stays in the connectome. This is only
+// the physics between a steering command and a grid.
 //
-// All three policies were measured against each other on the same seeds,
-// with everything else identical (16 episodes each):
-//   every tick            10 apples, best 1   (spins)
-//   once per decision      8 apples, best 2   (too rare, 13/16 hit a wall)
-//   at most 1 per 2 ticks 33 apples, best 5
-// So: keep turning while the decision holds, but no faster than one turn
-// per MIN_TURN_TICKS. That is the "turn, go straight, turn, go straight"
-// staircase a grid actually needs to reach a diagonal target — and a
-// diagonal is the common case, since an apple exactly on an axis is rare.
-function rotateLeft([dx, dy]) {
-  return [dy, -dx];
-}
-function rotateRight([dx, dy]) {
-  return [-dy, dx];
+// It replaces a rate limiter (at most one 90-degree turn per two ticks)
+// that was the best of three policies measured at the time, but that was
+// papering over a quantisation problem it could not fix. The brain would
+// say "the apple is 30 degrees to your right" and the game executed a
+// 90-degree turn, overshooting by 60; next tick it said "now 60 degrees to
+// your left" and the game overshot back. That is the slalom, and at larger
+// errors the same effect closes into an orbit. Measured over four
+// configurations, the fly turned wrongly about as often as rightly
+// whenever the apple was within 60 degrees of straight ahead (0.49-0.54
+// correct) and went straight on 2-4% of ticks — because on a grid, with
+// the apple 30 degrees off, *straight* is the correct move and the
+// controller had no way to express it.
+//
+// Integrating a rate expresses it: a weak command rotates the heading a
+// little and never crosses into the next cardinal, so the snake goes
+// straight; a strong one crosses quickly. The turn rate saturates at 90
+// degrees per tick, so a reversal can never happen in a single step.
+//
+// Measured against the rate-limited build, 40 episodes of 500 ticks each
+// per configuration, over two independent noise seeds (the LIF noise is
+// not seeded by default, and run-to-run spread on ten episodes turned out
+// to be wider than most of the effects being chased — this is measured on
+// twenty game seeds x two noise seeds, and the result repeats):
+//
+//     rate-limited 90-degree turns   83 apples, best 5 and 5
+//     integrated heading            112 apples, best 8 and 8
+//
+// The old build never once passed 5 apples in a life across all 40
+// episodes. Raising the obstacle gain on top of this was tried and made it
+// worse (83, then 47, at 4x and 12x), so LPLC1 keeps its old scale.
+const TURN_RATE_GAIN = 850.0; // rad/s per unit of DN left-right difference
+const MAX_TURN_RATE = Math.PI / (2 * TICK_SECONDS); // 90 degrees per tick
+const CARDINALS = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+];
+
+function nearestCardinal(heading) {
+  const k = ((Math.round(heading / (Math.PI / 2)) % 4) + 4) % 4;
+  return CARDINALS[k];
 }
 
-export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, onCollide } = {}) {
+export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, onCollide, onTick } = {}) {
   const canvas = document.createElement('canvas');
   canvas.width = cols * cellSize;
   canvas.height = rows * cellSize;
   const ctx = canvas.getContext('2d');
 
-  let snake, dir, currentMotorTurn, apple, alive, tickAcc, restartAcc, score, ticksSinceTurn;
+  let snake, dir, heading, currentTurnRate, apple, alive, tickAcc, restartAcc, score;
   // Survives reset() so a death doesn't erase what the fly has managed —
   // the run-to-run record is the number worth watching.
   let bestScore = 0;
@@ -47,8 +73,8 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
       { x: Math.floor(cols / 2) - 2, y: Math.floor(rows / 2) },
     ];
     dir = [1, 0];
-    currentMotorTurn = 'straight';
-    ticksSinceTurn = MIN_TURN_TICKS;
+    heading = 0; // radians, matching dir — the fly's own facing, not the grid's
+    currentTurnRate = 0;
     alive = true;
     tickAcc = 0;
     restartAcc = 0;
@@ -62,16 +88,20 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
     } while (snake.some((s) => s.x === apple.x && s.y === apple.y));
   }
 
-  function applyTurn(turn) {
-    currentMotorTurn = turn;
+  // The signed descending-neuron difference, straight from the backend.
+  function applyTurn(rate) {
+    currentTurnRate = rate;
   }
 
   function step() {
-    ticksSinceTurn++;
-    if (ticksSinceTurn >= MIN_TURN_TICKS && currentMotorTurn !== 'straight') {
-      dir = currentMotorTurn === 'left' ? rotateLeft(dir) : rotateRight(dir);
-      ticksSinceTurn = 0;
-    }
+    const rate = Math.max(-MAX_TURN_RATE, Math.min(MAX_TURN_RATE, TURN_RATE_GAIN * currentTurnRate));
+    heading += rate * TICK_SECONDS;
+    heading = Math.atan2(Math.sin(heading), Math.cos(heading));
+    const next = nearestCardinal(heading);
+    // A reversal is instant death against the neck, and the rate cap makes
+    // one impossible in a single step anyway — but the heading can wrap
+    // past two cardinals if a frame is ever dropped, so refuse it outright.
+    if (next[0] !== -dir[0] || next[1] !== -dir[1]) dir = next;
     const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
 
     const hitWall = head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows;
@@ -121,11 +151,21 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
   }
 
   function update(dtSeconds) {
+    // onTick fires once per *game* step, after the board has been redrawn,
+    // and is what drives sensory sampling. It used to run off its own 100ms
+    // timer in main.js while the game stepped every 150ms: not harmonic, so
+    // the phase between "what the fly last saw" and "when the game asks it
+    // to move" drifted continuously, and a decision was made against data
+    // anywhere from 0 to 100ms stale. Sampling here pins that lag to one
+    // constant — and the sample sees the board the move just produced,
+    // because draw() has already run.
+    let stepped = false;
     if (alive) {
       tickAcc += dtSeconds;
       while (tickAcc >= TICK_SECONDS) {
         tickAcc -= TICK_SECONDS;
         step();
+        stepped = true;
         if (!alive) break;
       }
     } else {
@@ -133,6 +173,7 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
       if (restartAcc >= RESTART_DELAY_SECONDS) reset();
     }
     draw();
+    if (stepped && alive) onTick?.();
   }
 
   function getDirection() {
@@ -146,8 +187,12 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
   // heading-vs-goal comparison, the way the real circuit does. Phase 3.1
   // pre-computed a relative bearing in JS and only ever fed the brain "half"
   // of that comparison (goal, no heading) — see docs/architecture-plan.md.
+  // The fly's own continuous heading, which is what its brain should get —
+  // not the quantised grid direction the body happens to be moving along.
+  // The two can differ by up to 45 degrees, and that difference is exactly
+  // the steering error the connectome needs to see in order to close it.
   function getHeadingAngle() {
-    return Math.atan2(dir[1], dir[0]);
+    return heading;
   }
 
   function getGoalAngle() {
