@@ -1004,6 +1004,60 @@ Live in the browser: the fly now eats two apples inside the first thirty
 seconds and survives over two minutes on a single life, against roughly
 one apple per 30-90 seconds and near-immediate death before.
 
+**Phase 3.11 — the steering readout was losing to its own noise (done).**
+After Phase 3.10 the fly still circled and still took tens of seconds per
+apple. Logging a long run showed it executing 22-25 turns per 50 ticks —
+the maximum the cooldown allows — essentially never going straight.
+Measuring the readout explained it:
+
+| | \|diff\| |
+| --- | --- |
+| no input at all, median | 0.000038 |
+| no input at all, p90 | 0.00205 |
+| no input, fraction over the 0.0001 threshold | **42%** |
+| apple 50° off, median | 0.00109 |
+
+The turn threshold sat *below the readout's own noise floor*. The fly was
+committing to turns on noise as often as on the apple — not aiming at
+anything, just a biased random walk that eventually stumbled onto food,
+which is exactly what "wanders in circles, takes tens of seconds" looks
+like. Raising only the threshold made it worse (14/14 straight into a
+wall), because the signal was small too.
+
+Three things had to move together, and the first is another case of a
+setting that was right, then wrong, then right again:
+
+- **`MOTOR_EMA_TAU_MS` back to 150ms.** Phase 3.5 cut it to 15ms because
+  the lag made the fly act on its pre-turn bearing — true while a held
+  decision was applied on every tick. Phase 3.10's rate limiting removed
+  most of that penalty and left only the noise cost, and with just 16
+  neurons per side a 15ms window is very noisy. Measured by window:
+
+  | tau | noise p90 | signal median | correctly signed |
+  | --- | --- | --- | --- |
+  | 15ms | 0.00154 | 0.00104 | 89% |
+  | 40ms | 0.00123 | 0.00144 | 97% |
+  | 80ms | 0.00072 | 0.00138 | 98% |
+  | 150ms | 0.00061 | 0.00135 | **100%** |
+
+- **Thresholds to 0.003**, above the 150ms noise floor and below the
+  driven signal.
+- **`VISUAL_SCALE` to 30**, so a real bearing error clears the higher bar.
+
+Result: 42-52 apples per 14 episodes against 39 for the old low-signal,
+low-threshold combination — but the number that matters is the shape of
+the trajectory, which is now aimed rather than wandering: distance to the
+apple falls 8→7→6→5→4→3→2→1, and five apples land inside 55 ticks. Live
+in the browser the fly eats one every four to eight seconds, and took
+four inside a six-second stretch, against roughly one per 30-90 seconds
+before. Escape gain and turn cooldown were re-swept in the new regime and
+0.01 / 2 ticks remain the best points.
+
+Three separate times now, the fix has been a parameter that was correct
+when it was set and became wrong when something else changed —
+`MOTOR_EMA_TAU_MS` twice, the turn policy once. Worth re-testing rejected
+options whenever the thing that made them fail has moved.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
