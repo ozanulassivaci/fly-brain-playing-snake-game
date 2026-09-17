@@ -1170,6 +1170,151 @@ fly flies straighter, so the obstacle pathway has less slack to save it by
 accident — and a higher gain is not the answer. That is the next thing to
 work on.
 
+## Phase 3.13 — where the deaths actually come from, and the 97% we were not using
+
+Three questions this phase started from: the fly dies at walls but must
+still be able to eat an apple sitting against one; it dies against its own
+body once it has grown; and is the brain out of sync with the game.
+
+### Where the deaths come from
+
+Sixty episodes of 500 ticks, three noise seeds, logging the state at every
+death rather than only the totals:
+
+| apple's distance from an edge | share of spawns | share of wall deaths | ratio |
+| --- | --- | --- | --- |
+| 0 (against the wall) | 7.8% | **22%** | **2.8x** |
+| 1 | 13.8% | **32%** | **2.3x** |
+| 2 | 10% | 19% | 1.9x |
+| 3+ | 68% | 27% | 0.4x |
+
+The fly does not wander into walls. It flies into them **chasing an apple
+that is next to one**: 54% of wall deaths happen while the apple sits in
+the outer two rings, which are only 21.6% of spawns. Self-collisions are a
+different phase of the same life — they cluster at snake length 8 (9 of
+23) with a median of 5 apples already eaten, where wall deaths have a
+median of 1. Survive the wall phase, then the growth phase.
+
+### The obstacle pathway, measured in isolation
+
+Holding a threat on one side with no apple, against the same protocol used
+for LC10:
+
+| | steering readout |
+| --- | --- |
+| apple 15° off axis (the weakest useful signal) | +0.0031 |
+| apple 90° off axis | +0.0123 |
+| **wall to one side** | **+0.00089** |
+| **wall dead ahead** | **+0.00002** |
+
+A lateral wall is 3.5x weaker than the weakest useful apple signal. A wall
+**dead ahead produces nothing at all** — it is bilaterally symmetric and
+the readout is a left-right difference, so the one thing that reaches the
+motor output cancels exactly. Trajectory logs show it directly: heading
+straight at a wall, `L-R` reads +0.060, +0.016, +0.0009, 0.0000, 0.0000
+while the total threat climbs past 2.0. The fly was not ignoring the wall;
+it was never told.
+
+### Six attempts at that, all measured, all rejected
+
+- **Looming** (threat as a rate of rise against an adapting baseline, the
+  same construction that made odour work). 160 apples against 209, and it
+  did not reduce wall deaths. The reason is arithmetic: it raises the gain
+  on a lateral difference that is *zero* in the case it was built for.
+- **Flipping the threat side to ipsilateral.** The anatomy argued for it —
+  LPLC1 → escape DNp is 11,608 ipsilateral and escape DNp → DNa* is 544
+  at 96% crossing, against only 575 for LPLC1 → DNa* direct, so the
+  dominant route inverts our convention. Measured in isolation, the
+  current contralateral convention is correct (threat left → +0.00089,
+  turning away) and the flip is exactly backwards (−0.00074, turning
+  *into* it). A good argument that would have broken the fly.
+- **LPLC2, driven bilaterally.** 185 of them in the subset, unused, and
+  anatomically the right cell: it is the dedicated collision-course
+  detector, its only route to steering is the escape DNs, and escape DN
+  input is systematically left-biased (DNp03 10,665/8,100; DNp11
+  11,641/9,739), so a symmetric loom should still resolve to a side.
+  Produces **+0.00002 at drive scale 100** — nothing. Driving the escape
+  DNs directly produces nothing either. In this subset the escape circuit
+  cannot deliver a steering signal at all.
+- **Steeper distance falloff** (1/d² and 1/d³, re-tested because the
+  reason 1/d was chosen — a controller too slow to act on a late signal —
+  went away with the heading integrator). Best 149 against 148; the rest
+  worse.
+- **Weighting the snake's own body above the wall**, which LC/LPLC cells
+  argue for since they are small-object selective and a 13-cell wall line
+  is not the stimulus they respond to. This one *worked at what it aimed
+  at*: self-collisions fall 16 → 13 → 3 → 0 as the weight goes 1 → 3 → 10
+  → 30. But wall deaths rise 24 → 27 → 37 → 40 and the apple total does
+  not move.
+- **Raising the obstacle gain**, in every combination above.
+
+That last pattern is the finding, not the failure: **every one of these
+trades one kind of death for another.** Apple attraction, wall repulsion
+and body repulsion all compete for the same scalar — 16 DNa neurons per
+side — and the budget is fixed.
+
+### The 97%
+
+So the question became what actually drives that readout. The 32 DNa*
+neurons receive 326,741 total input weight, and everything this project
+injects arrives through about **2.9%** of it — LC10 1.2%, PFL 0.9%, MBON
+0.4%, LPLC1 0.2%, LPLC2 0. The rest is LAL, PS, AOTU and VES: the premotor
+network, which in insects is where steering commands are assembled. The
+subset had 8 of the LAL's 204 types and none of PS's 266.
+
+Every pathway here had a real route we were not using:
+
+| | → DNa* direct | → LAL/PS/AOTU | |
+| --- | --- | --- | --- |
+| LC10 (visual target) | 3,863 | **379,073** | 98x |
+| LH (odour) | 66 | **16,672** | 253x |
+| PFL (central complex) | 2,832 | 40,010 | 14x |
+| MBON (mushroom body) | 1,145 | 25,164 | 22x |
+| LPLC1 (obstacle) | 575 | 5,126 | 9x |
+
+Phase 3.9 got odour working over a 66-weight connection while its real
+16,672-weight route was not in the model. That is also the measured reason
+raising any of these gains only ever moved deaths around: they were all
+competing inside the 3% of the readout we could reach.
+
+Adding LAL/PS/AOTU/VES costs 2,185 neurons (29,876 → 32,061) and 0.36M
+edges (2.44M → 2.81M), and the simulation still runs at 2.44x real time,
+1.00x over the wire. It makes the readout substantially better:
+
+| apple off-axis | 15° | 45° | 90° | noise p90 |
+| --- | --- | --- | --- | --- |
+| before | 0.0031 | 0.0087 | 0.0123 | 0.00060 |
+| after | 0.0096 | 0.0254 | 0.0335 | 0.00033 |
+
+2.7x the signal, half the noise, graded out to 90° instead of flattening
+at 60°. `TURN_RATE_GAIN` had to come down 850 → 310 to match — at 850 the
+fly spins (48 apples, 47 of 60 deaths by self-collision), so this was a
+required part of the change rather than tuning on top of it.
+
+**Result: apples unchanged, variance gone.** 200 against 209 over 60
+episodes, well inside the spread — but 67/66/67 across three noise seeds
+where the old build gave 66/82/61. Deaths stay 38 wall / 22 self against
+37 / 23. Confirmed live in the browser: ten lives in 180 seconds, an apple
+every 2.5-4 seconds.
+
+Kept on the evidence of faithfulness and reproducibility rather than
+score, and stated as such: the premotor stage genuinely belongs in a model
+that claims to read a decision off descending neurons, the readout is
+measurably cleaner, and the obstacle pathway's real route into steering is
+now present, which anything that improves avoidance will need.
+
+### Synchronisation
+
+There was a real problem and Phase 3.12 fixed it (sampling now runs on the
+game tick instead of a free 100ms timer against a 150ms tick). What
+remains is latency, not phase: injected current decays over 300ms and the
+motor readout averages over 150ms, so a decision rests on geometry one to
+two cells old. `MOTOR_EMA_TAU_MS` was measured as harmful to shorten in
+Phase 3.11 — but that was when the readout was a threshold crossing and
+now it is a rate that a heading integrator smooths anyway. Not yet
+re-tested; it is the fourth instance of a setting that may have become
+wrong when what reads it changed.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
