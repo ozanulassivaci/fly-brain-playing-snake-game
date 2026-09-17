@@ -82,10 +82,24 @@ export function createSnakeGame({ cols = 20, rows = 20, cellSize = 24, onEat, on
     spawnApple();
   }
 
+  // Classic Snake picks uniformly among free cells, and this did too. The
+  // trouble is arithmetic rather than fairness: on a 20x20 board the two
+  // outermost rings are 36% of the squares, so more than a third of apples
+  // land where reaching one means flying at a wall and pulling away inside
+  // a cell or two. Rejection sampling thins those rings to about 22% —
+  // still reachable often enough to matter, no longer the common case.
+  // This changes the game rather than the fly, deliberately and at the
+  // user's request; nothing here touches how the apple is found.
   function spawnApple() {
-    do {
-      apple = { x: Math.floor(Math.random() * cols), y: Math.floor(Math.random() * rows) };
-    } while (snake.some((s) => s.x === apple.x && s.y === apple.y));
+    for (;;) {
+      const x = Math.floor(Math.random() * cols);
+      const y = Math.floor(Math.random() * rows);
+      const margin = Math.min(x, y, cols - 1 - x, rows - 1 - y);
+      if (Math.random() > Math.min(1, (margin + 1) / 3)) continue;
+      if (snake.some((s) => s.x === x && s.y === y)) continue;
+      apple = { x, y };
+      return;
+    }
   }
 
   // The signed descending-neuron difference, straight from the backend.
