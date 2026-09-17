@@ -21,6 +21,10 @@ const COLUMNS = [
       { key: 'motion_b', label: 'b', ref: 0.001 },
       { key: 'motion_c', label: 'c', ref: 0.001 },
       { key: 'motion_d', label: 'd', ref: 0.001 },
+      // Phase 3.14: T4/T5's output stage. Until it was added, these four
+      // fed nothing — T4/T5 reach the steering readout through the lobula
+      // plate or not at all, and the lobula plate was not in the subset.
+      { key: 'lptc', label: 'LPTC', ref: 0.0015 },
     ],
   },
   {

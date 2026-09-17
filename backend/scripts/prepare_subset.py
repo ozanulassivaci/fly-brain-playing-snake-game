@@ -29,6 +29,30 @@ DATA_PROCESSED = REPO_ROOT / "data" / "processed"
 FRONTEND_ASSETS = REPO_ROOT / "frontend" / "assets"
 
 MOTION_PATTERN = re.compile(r"^(T4|T5|LC\d|LPLC\d|LT\d)")
+# Phase 3.14: the lobula plate's output stage. Checked against this dataset
+# after Phase 3.13 put the premotor network in and the motion pathway still
+# went nowhere: T4/T5 -> DNa* is 0 weight and T4/T5 -> LAL/PS/AOTU/VES is
+# also 0. T4/T5 are early cells; they project to the lobula plate
+# tangential cells, and those were not in the subset because none of them
+# match MOTION_PATTERN. So the retina has been driving 13,581 T4/T5
+# neurons — 42% of the whole subset — into a dead end for the entire
+# project, lighting up the brain panel and reaching the motor readout with
+# exactly nothing.
+#
+# The missing stage is 350 neurons (HS 6, VS 18, H1/H2 4, LPT 302, Am1 2)
+# and it is where the signal actually goes:
+#
+#     T4/T5             -> it                  589,447
+#     it                -> LAL/PS/AOTU/VES      34,002
+#     it                -> DNa* direct           1,186  (mostly ipsilateral)
+#
+# For scale, the obstacle pathway's direct route is 575 and its premotor
+# route 5,126, so this stage carries twice the one and six times the other.
+# These are also the cells behind the optomotor response — the reflex that
+# uses self-generated wide-field motion to oppose an unintended turn, i.e.
+# the fly's own damping for exactly the steering oscillation this build
+# shows as a slalom.
+LOBULA_PLATE_PATTERN = re.compile(r"^(HS|VS|H1|H2|LPT|Am1)")
 
 # Phase 3.8: the olfactory / mushroom-body pathway. Real flies find food
 # primarily by smell, and the whole canonical circuit is present in this
@@ -206,7 +230,11 @@ def build_subset() -> pd.DataFrame:
     roi_df = load_roi_info()[["bodyId", "roiInfo"]]
     nt_df = load_neurotransmitters()
 
-    motion_types = {t for t in traced["type"].dropna().unique() if MOTION_PATTERN.match(str(t))}
+    motion_types = {
+        t
+        for t in traced["type"].dropna().unique()
+        if MOTION_PATTERN.match(str(t)) or LOBULA_PLATE_PATTERN.match(str(t))
+    }
     motion_mask = traced["type"].isin(motion_types)
     dn_mask = traced["superclass"] == "descending_neuron"
 

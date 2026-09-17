@@ -56,6 +56,7 @@ INHIB_GAIN = {
     "epg": 400.0,
     "lc10": 400.0,
     "lplc1": 400.0,
+    "lptc": 400.0,
     "pn": 400.0,
     "lh": 400.0,
     "kc": 400.0,
@@ -76,29 +77,43 @@ ACTIVITY_EMA_TAU_MS = 20.0
 # direction letter combines both).
 DIRECTION_TYPE_PATTERN = re.compile(r"^T[45]([abcd])")
 SENSORY_SCALE = 0.5
-# How long the steering readout is averaged over, and the second knob in
-# this file to be right, then wrong, then right again as the rest changed.
+# How long the steering readout is averaged over: 150ms, then 15ms, then
+# 150ms again, and now 40ms. Every one of those was the right answer when
+# it was set, and each became wrong when something downstream changed —
+# this file's clearest case of a setting that has to be re-derived rather
+# than remembered.
 #
-# Phase 3.5 cut it from 150ms to 15ms because the lag was making the fly
-# act on its pre-turn bearing and orbit the apple — true at the time,
-# when a held decision was applied on *every* tick. Phase 3.10 rate-limited
-# turning to one per two ticks, which removes most of that lag penalty and
-# leaves the other side of the trade-off exposed: only 16 neurons per side
-# feed this readout, so a 15ms window is extremely noisy. Measured
-# directly, signal (apple 50 degrees off) against noise (no input at all):
+# Phase 3.5 cut it to 15ms because the lag made the fly act on its pre-turn
+# bearing. Phase 3.10 rate-limited turning, which removed most of that
+# penalty and left the noise cost exposed, so Phase 3.11 put it back to
+# 150ms: with only 16 neurons a side and a *threshold* readout, a 15ms
+# window had a noise p90 above the signal median and the fly committed to
+# turns on noise as often as on the apple.
 #
-#     tau    noise p90    signal median    correctly signed
-#      15     0.00154        0.00104             89%
-#      40     0.00123        0.00144             97%
-#      80     0.00072        0.00138             98%
-#     150     0.00061        0.00135            100%
+# Neither of those conditions holds now. The readout is a turn rate that a
+# heading integrator smooths anyway (Phase 3.12), and the premotor network
+# (Phase 3.13) made the signal 2.7x stronger against half the noise, so the
+# averaging window is no longer doing the job it was kept for — it is only
+# adding delay. And delay is what the remaining bad behaviour was made of:
+# the slalom that kills a grown snake is a delayed-feedback oscillation,
+# measured at a period of 10 ticks (1.50s) against a loop delay of ~375ms,
+# which is the textbook 4x. Self-collisions cluster at snake length 8,
+# where the body first becomes long enough to re-enter its own weave.
 #
-# At 15ms the noise p90 is *above* the signal median — the fly was turning
-# on noise as often as on the apple, which is exactly the aimless circling
-# that kept being reported. At 150ms the signal is correctly signed every
-# time. With turning rate-limited, the lag costs little and the
-# signal-to-noise is worth far more.
-MOTOR_EMA_TAU_MS = 150.0
+# Swept over 60 episodes of 700 ticks, three noise seeds:
+#
+#     window   apples   best   self-collisions   oscillation period
+#      150ms     199      7          25              10 ticks
+#      100ms     208      8          24               8
+#       60ms     215     11          20               8
+#       40ms     252     12          18               6
+#       25ms     217     12          11               6
+#       15ms     200     13          14               8
+#        8ms     177      7          17               8
+#
+# The period tracks the window exactly as the oscillation model predicts,
+# and below 40ms the old noise argument reasserts itself.
+MOTOR_EMA_TAU_MS = 40.0
 
 # Phase 3.2: goal direction via the real, published FC -> PFL3 -> DNa02
 # steering circuit (Westeinde et al.), checked against this exact dataset's
@@ -277,6 +292,13 @@ VISUAL_SCALE = 10.0
 # then simply sum at the descending neurons, which is how competing
 # steering drives resolve in a real brain too.
 LPLC1_TYPE_PATTERN = re.compile(r"^LPLC1$")
+# Phase 3.14: the lobula plate tangential cells, T4/T5's actual output
+# stage (see LOBULA_PLATE_PATTERN in prepare_subset.py for why they were
+# missing and what they carry). Split out of the motion cluster for the
+# same reason LC10 and LPLC1 are: 350 neurons sharing a homeostatic pool
+# with 13,581 T4/T5 cells would be governed by the T4/T5 average and
+# crushed by its overshoot.
+LPTC_TYPE_PATTERN = re.compile(r"^(HS|VS|H1|H2|LPT|Am1)")
 OBSTACLE_SCALE = 2.5
 
 # Reading the avoidance signal off DNa alone did not work, and the reason
@@ -475,8 +497,9 @@ class LifSimulation:
         # motion-cluster average up and have that cluster's inhibition
         # crush the very signal being injected.
         is_lplc1 = np.array([bool(LPLC1_TYPE_PATTERN.match(t)) for t in neuron_type])
+        is_lptc = np.array([bool(LPTC_TYPE_PATTERN.match(t)) for t in neuron_type])
         cx_other = (cluster == "cx") & ~is_fc & ~is_pfl & ~is_epg
-        motion_other = (cluster == "motion") & ~is_lc10 & ~is_lplc1
+        motion_other = (cluster == "motion") & ~is_lc10 & ~is_lplc1 & ~is_lptc
         self.cluster_masks = {
             "motion": torch.from_numpy(motion_other.astype(np.float32)).to(self.device),
             "cx": torch.from_numpy(cx_other.astype(np.float32)).to(self.device),
@@ -486,6 +509,7 @@ class LifSimulation:
             "epg": torch.from_numpy(is_epg.astype(np.float32)).to(self.device),
             "lc10": torch.from_numpy(is_lc10.astype(np.float32)).to(self.device),
             "lplc1": torch.from_numpy(is_lplc1.astype(np.float32)).to(self.device),
+            "lptc": torch.from_numpy(is_lptc.astype(np.float32)).to(self.device),
             "pn": torch.from_numpy((cluster == "pn").astype(np.float32)).to(self.device),
             "lh": torch.from_numpy((cluster == "lh").astype(np.float32)).to(self.device),
             "kc": torch.from_numpy((cluster == "kc").astype(np.float32)).to(self.device),
@@ -567,6 +591,7 @@ class LifSimulation:
             "epg": self.cluster_masks["epg"],
             "fc": self.cluster_masks["fc"],
             "pfl": self.cluster_masks["pfl"],
+            "lptc": self.cluster_masks["lptc"],
             "lal": self.cluster_masks["lal"],
             "dna_left": self.dn_left_mask,
             "dna_right": self.dn_right_mask,
