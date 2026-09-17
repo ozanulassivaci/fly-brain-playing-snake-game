@@ -13,10 +13,15 @@ const CLUSTER_COLORS = {
   motion: [0.31, 0.71, 1.0],
   cx: [1.0, 0.78, 0.31],
   dn: [1.0, 0.39, 0.51],
+  // Phase 3.13: the premotor steering network (LAL / PS / AOTU / VES),
+  // which supplies 48% of the input to the descending neurons the motor
+  // decision is read from. Clusters with no entry here are silently
+  // dropped from the point cloud, so it has to be listed to be seen.
+  lal: [0.55, 1.0, 0.72],
 };
 
-const BASE_SIZE = { motion: 0.01, cx: 0.03, dn: 0.04 };
-const BASE_OPACITY = { motion: 0.25, cx: 0.4, dn: 0.45 };
+const BASE_SIZE = { motion: 0.01, cx: 0.03, dn: 0.04, lal: 0.02 };
+const BASE_OPACITY = { motion: 0.25, cx: 0.4, dn: 0.45, lal: 0.35 };
 const DIM_FACTOR = 0.12;
 const FLASH_DECAY = 0.82; // multiplicative color decay per render frame
 
@@ -38,7 +43,7 @@ function makeGlowTexture() {
 
 export async function createBrainViz(canvas, { onMotor, onGroups } = {}) {
   const data = await fetch('./assets/brain-subset.json').then((r) => r.json());
-  const byCluster = { motion: [], cx: [], dn: [] };
+  const byCluster = { motion: [], cx: [], dn: [], lal: [] };
   data.points.forEach((p, globalIndex) => {
     byCluster[p.c]?.push({ ...p, globalIndex });
   });

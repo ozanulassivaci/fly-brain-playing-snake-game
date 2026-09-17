@@ -65,6 +65,40 @@ KC_PATTERN = re.compile(r"^KC")
 MBON_PATTERN = re.compile(r"^MBON")
 PAM_PATTERN = re.compile(r"^PAM")
 APL_PATTERN = re.compile(r"^APL$")
+# Phase 3.13: the premotor steering network. Measured against this dataset
+# rather than assumed, and it is the largest single omission the project
+# has had: the 32 DNa* steering neurons we read the motor decision from
+# receive 326,741 total input weight, and everything we inject reaches them
+# through populations worth about 2.9% of it —
+#
+#     LC10 (visual target)  3,863 direct  (1.2%)
+#     PFL  (central complex) 2,832        (0.9%)
+#     MBON (mushroom body)   1,145        (0.4%)
+#     LPLC1 (obstacle)         575        (0.2%)
+#     LPLC2                      0
+#
+# The other 97% comes from LAL (lateral accessory lobe), PS (posterior
+# slope), AOTU and VES interneurons. That is exactly where it should come
+# from: in insects the LAL *is* the premotor steering centre, where
+# descending steering commands are assembled. We had 8 of the LAL's 204
+# types and none of PS's 266.
+#
+# Which means every sensory pathway in this project has been entering
+# through a side door. Their real routes to steering:
+#
+#     LC10  -> DNa* direct 3,863   -> LAL/PS/AOTU 379,073   (98x)
+#     LH    -> DNa* direct    66   -> LAL/PS/AOTU  16,672  (253x)
+#     PFL   -> DNa* direct 2,832   -> LAL/PS/AOTU  40,010   (14x)
+#     MBON  -> DNa* direct 1,145   -> LAL/PS/AOTU  25,164   (22x)
+#     LPLC1 -> DNa* direct   575   -> LAL/PS/AOTU   5,126    (9x)
+#
+# The odour pathway was made to work over a 66-weight connection while its
+# real 16,672-weight route was not in the model at all, and obstacle
+# avoidance stayed a whisper for the same reason — which is the measured
+# explanation for why raising any of these gains only ever traded one kind
+# of death for another: they were all competing inside the ~3% of the
+# steering readout we could actually reach.
+PREMOTOR_PATTERN = re.compile(r"^(LAL|PS|AOTU|VES)\d")
 CORE_CX_ROI_PATTERN = re.compile(r"^(EB|FB|PB(\(|$)|NO$|NO\()")
 MIN_CX_SYNWEIGHT = 5
 # FC (fan-shaped body columnar, real goal-direction cell types) instance
@@ -177,6 +211,7 @@ def build_subset() -> pd.DataFrame:
     dn_mask = traced["superclass"] == "descending_neuron"
 
     types = traced["type"].fillna("")
+    premotor_mask = types.str.match(PREMOTOR_PATTERN)
     olf_masks = {
         "pn": types.str.match(PN_PATTERN),
         "lh": types.str.match(LH_PATTERN),
@@ -197,6 +232,8 @@ def build_subset() -> pd.DataFrame:
         for body_id in traced.loc[mask, "bodyId"]:
             olf_cluster_by_id.setdefault(body_id, name)
 
+    premotor_ids = set(traced.loc[premotor_mask, "bodyId"])
+
     def cluster_for(row) -> str | None:
         if row["superclass"] == "descending_neuron":
             return "dn"
@@ -204,9 +241,11 @@ def build_subset() -> pd.DataFrame:
             return "cx"
         if row["type"] in motion_types:
             return "motion"
+        if row["bodyId"] in premotor_ids:
+            return "lal"
         return olf_cluster_by_id.get(row["bodyId"])
 
-    subset = traced[motion_mask | cx_mask | dn_mask | olf_any].copy()
+    subset = traced[motion_mask | cx_mask | dn_mask | olf_any | premotor_mask].copy()
     subset["cluster"] = subset.apply(cluster_for, axis=1)
     subset = subset.merge(nt_df, on="bodyId", how="left")
     subset = subset[subset["somaLocation"].notna()].reset_index(drop=True)

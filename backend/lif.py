@@ -62,6 +62,10 @@ INHIB_GAIN = {
     "mbon": 400.0,
     "pam": 400.0,
     "apl": 400.0,
+    # Phase 3.13's premotor cluster (LAL / PS / AOTU / VES). Its own pool,
+    # like every other population here — see the note above: a cluster
+    # sharing a pool with a driven one gets crushed by that one's overshoot.
+    "lal": 400.0,
 }
 ACTIVITY_EMA_TAU_MS = 20.0
 
@@ -488,6 +492,7 @@ class LifSimulation:
             "mbon": torch.from_numpy((cluster == "mbon").astype(np.float32)).to(self.device),
             "pam": torch.from_numpy((cluster == "pam").astype(np.float32)).to(self.device),
             "apl": torch.from_numpy((cluster == "apl").astype(np.float32)).to(self.device),
+            "lal": torch.from_numpy((cluster == "lal").astype(np.float32)).to(self.device),
         }
 
         fc_column = data["fc_column"]
@@ -562,6 +567,7 @@ class LifSimulation:
             "epg": self.cluster_masks["epg"],
             "fc": self.cluster_masks["fc"],
             "pfl": self.cluster_masks["pfl"],
+            "lal": self.cluster_masks["lal"],
             "dna_left": self.dn_left_mask,
             "dna_right": self.dn_right_mask,
         }

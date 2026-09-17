@@ -41,7 +41,17 @@ const ANTENNA_OFFSET = 0.6; // cells either side of the head (see getOdour)
 // The old build never once passed 5 apples in a life across all 40
 // episodes. Raising the obstacle gain on top of this was tried and made it
 // worse (83, then 47, at 4x and 12x), so LPLC1 keeps its old scale.
-const TURN_RATE_GAIN = 850.0; // rad/s per unit of DN left-right difference
+// rad/s per unit of DN left-right difference. Cut from 850 in Phase 3.13,
+// not as tuning but because the quantity being multiplied changed size:
+// adding the premotor network (backend/scripts/prepare_subset.py) made the
+// steering readout 2.7x stronger for the same visual drive, so the old gain
+// over-rotated. Shipping the new subset with the old value would have been
+// a regression, not a neutral change -- measured over 60 episodes:
+//
+//     gain 200   133 apples    gain 310   200 apples
+//     gain 500   110 apples    gain 850    48 apples, 47 of 60 deaths by
+//                                          self-collision (it spins)
+const TURN_RATE_GAIN = 310.0;
 const MAX_TURN_RATE = Math.PI / (2 * TICK_SECONDS); // 90 degrees per tick
 const CARDINALS = [
   [1, 0],

@@ -59,6 +59,14 @@ const COLUMNS = [
     ],
   },
   {
+    // Phase 3.13. Not decoration: the lateral accessory lobe and posterior
+    // slope supply 48% of the input to the DNa neurons in the next column,
+    // against 2.9% for every sensory population this panel shows to its
+    // left. Leaving the stage out drew a pipeline the fly does not have.
+    title: 'Premotor',
+    nodes: [{ key: 'lal', label: 'LAL/PS', ref: 0.0015 }],
+  },
+  {
     title: 'Steer',
     nodes: [
       { key: 'dna_left', label: 'DNa L', ref: 0.002 },
