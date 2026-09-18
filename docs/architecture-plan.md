@@ -1442,6 +1442,104 @@ can be driven to zero by shortening the loop further — at a cost in wall
 deaths that is worse than the gain. Splitting that trade needs the two
 threats to stop competing for one scalar, which is still the open problem.
 
+## Phase 3.15 — a self-critique, and the plan it produced, measured and rejected
+
+Prompted by the report that the Phase 3.14 build hits walls more often (true:
+wall deaths went from 35 to 42 of 60 in the harness, which the Phase 3.14
+write-up underplayed) and by the sense that the project had stalled.
+
+### Is the connectome doing the work at all?
+
+Three conditions on identical seeds, 60 episodes of 700 ticks:
+
+| | apples |
+| --- | --- |
+| real MaleCNS wiring | 252 |
+| weight matrix zeroed | 0 (60/60 wall deaths) |
+| same graph, neuron identities permuted | **0** (60/60 wall deaths) |
+
+The permuted graph keeps every statistic — degrees, weights, signs,
+sparsity — and scrambles only which biological cell is which. It cannot eat
+a single apple. So the behaviour depends on the real anatomy, not on having
+a large recurrent network with the right statistics. (The zeroed condition
+is close to tautological, since DNa's only input is the network; the
+permuted one is the informative control.)
+
+### How much of the released data is used
+
+15.3% of the 211,577 neurons, 11.4% of the 25.6M edges. Of the real input
+weight onto the populations that matter, reproduced inside the subset:
+DNa* 62.1%, lobula plate 68.6%, MBON 81.3%, LH 56.3%, LAL/PS 54.0%, LC10
+38.9%, **LPLC1 23.8%, PN 14.5%** — the two worst-covered being the two
+channels that have repeatedly failed.
+
+What the model takes from the dataset is, in practice, the connectivity
+matrix and each neuron's transmitter sign. Everything else is ours: uniform
+LIF parameters for every cell, one global weight scale, no synaptic delays,
+no conductance synapses, no modulation, a sensory interface that hands over
+the apple's bearing as a number, and a homeostatic clamp with 16 hand-set
+gains holding every population at a fixed rate.
+
+### The plan, and why each step failed
+
+**Visual local inhibition** (Li, LoVC, LoVP, TuTu, MeTu: +3,387 neurons,
+1.2x edges). The case for it was good on paper: these cells act directly on
+LC10 and LPLC1, 1,230 of the 1,558 Li cells are inhibitory, TuTu forms a
+closed glutamatergic loop with LC10 (47,839 in, 37,288 back), LC10 coverage
+would go 38.9% -> 60.8%, and the model's inhibition/excitation coverage
+ratio 0.82 -> 0.99. The success criterion set in advance was that LC10's
+response curve should stop saturating at VISUAL_SCALE 30. It did not
+change (0.0544 / 0.0515 / 0.0557 at 45 / 60 / 90 degrees, against 0.0560 /
+0.0549 / 0.0565 without). Behaviour: 219 apples against 252, and 236 with
+the new cells' own clamp removed.
+
+**Loosening the clamp**, which the balanced E/I ratio was supposed to
+permit. All gains halved: 131 apples, 56 of 60 deaths by self-collision, an
+oscillation period of 4 ticks — the fly spins. The clamp cannot be weakened.
+
+**Antennal-lobe local neurons** (315 cells, 158 inhibitory, reciprocal with
+the PNs at ~330,000 weight each way). 244 apples against 252; with their
+clamp removed, 221, and the LNs run at 368x the target rate.
+
+**Retinotopy** was gated on the first two and was not attempted. Two
+arguments made for it earlier were also wrong on inspection: it would not
+fix the head-on wall case (an object dead ahead is bilaterally symmetric
+on a retinotopic map too, and the readout is still left minus right), and
+the full hex-mapped retina layer *worsens* the E/I ratio (0.73).
+
+**Neuromodulators.** The dataset has 101 octopaminergic, 48 serotonergic
+and 396 dopaminergic cells (21, 8 and 344 of them already in the subset).
+Octopamine is the most Snake-relevant — the flight/arousal modulator, with
+OA-VUMa1 sending 17,716 weight into the LAL — but this simulator has no
+notion of modulation: added as cells, they would be ordinary excitatory
+neurons, and making them act as a hormone would be a mechanism written by
+us, not read from the data. Not attempted.
+
+**A looming veto on pursuit.** The looming pathway has no inhibitory route
+at all onto LC10, the LAL or DNa (1,434 / 11,093 / 1,513 weight, all
+excitatory). No anatomical basis; not attempted.
+
+All three structural changes were reverted; the build is Phase 3.14's.
+
+### What the diagnostics say about the regime the model is in
+
+The injected populations run far above the target rate — LC10 at 36-66x,
+PN at 35x — while everything downstream is pinned near 1x by the clamp. So
+the operating picture is: saturated input layer -> clamped relay ->
+left-minus-right readout. The only information that survives is which side
+of a saturated input population is more active. Every addition this phase
+landed in the clamped middle, where by construction it cannot change the
+sustained activity of anything.
+
+That is the honest summary of where the project stands. Adding real
+anatomy helped while it opened routes that did not exist (Phase 3.13's
+premotor network made the readout signal 2.7x stronger). It stops helping
+once the routes exist, because the dynamics the anatomy runs on — uniform
+parameters and a proportional clamp in place of real inhibition — flatten
+whatever the extra wiring could express. Further gains most likely need a
+change in model class (per-type dynamics, synaptic time constants, real
+inhibitory balance) rather than more of the connectome in the current one.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
