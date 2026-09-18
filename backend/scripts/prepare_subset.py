@@ -22,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow.feather as feather
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_RAW = REPO_ROOT / "data" / "raw"
@@ -191,20 +192,19 @@ def load_annotations() -> pd.DataFrame:
 
 
 def load_roi_info() -> pd.DataFrame:
-    # bodyId/type/superclass/status/roiInfo only — see data/raw/README-ish
-    # note in docs/architecture-plan.md: this is a column-projected copy of
-    # the full Neuprint_Neurons.feather (the only table with real roiInfo).
-    df = pd.read_feather(DATA_RAW / "neurons_roi_subset.feather")
+    # Read straight out of the full Neuprint_Neurons.feather (the only table
+    # with real roiInfo), projecting just the five columns needed. This used
+    # to read a hand-made column-projected copy, neurons_roi_subset.feather,
+    # which no script produced — a step nobody could reproduce from the
+    # README.
+    cols = ["bodyId:long", "type:string", "superclass:string", "status:string", "roiInfo:string"]
+    table = feather.read_table(DATA_RAW / "Neuprint_Neurons.feather", columns=cols)
+    df = table.to_pandas().rename(columns={c: c.split(":")[0] for c in cols})
     return df[df["status"] == "Traced"].copy()
 
 
 def load_neurotransmitters() -> pd.DataFrame:
-    # The full Neuprint_Neurons.feather again (same file load_roi_info's
-    # neurons_roi_subset.feather was pre-projected from), a different
-    # column pair this time — consensusNt isn't in that smaller projection,
-    # so this reads the big file directly, column-projected to keep it fast.
-    import pyarrow.feather as feather
-
+    # The full Neuprint_Neurons.feather again, a different column pair.
     table = feather.read_table(
         DATA_RAW / "Neuprint_Neurons.feather", columns=["bodyId:long", "consensusNt:string"]
     )
