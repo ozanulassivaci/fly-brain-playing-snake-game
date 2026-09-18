@@ -1540,6 +1540,68 @@ whatever the extra wiring could express. Further gains most likely need a
 change in model class (per-type dynamics, synaptic time constants, real
 inhibitory balance) rather than more of the connectome in the current one.
 
+## Phase 3.16 — which sense the fly plays with, and the first model-class probes
+
+### It plays on the handed-over bearing, not on smell
+
+Withholding senses, 60 episodes of 700 ticks each:
+
+| the brain receives | apples |
+| --- | --- |
+| everything | 252 |
+| **smell only** (no apple bearing to LC10 or FC) | **0** (60/60 wall) |
+| vision only (no smell) | 239 |
+| neither | 0 |
+
+The odour channel works the way a real one should on the input side —
+two antennae 1.2 cells apart, concentration `1/(1+d^2)` rising on
+approach — but it contributes nothing measurable to play: removing it
+changes 252 to 239, inside the spread. Held in isolation (fly advancing a
+cell per tick past an apple 2, 4 or 6 cells to one side), the steering
+readout's median response is 0.00002-0.00054, under the 0.00146 noise
+floor and about 100x weaker than a 15-degree visual bearing, with peaks
+of inconsistent sign.
+
+Found while checking why: the klinokinesis mechanism
+(`ODOUR_TURN_SUPPRESSION`, holding course while the lateral horn reports a
+rising smell) only raises the threshold of the left/right/straight label.
+Since Phase 3.12 made the heading integrator read the raw steering rate,
+that label no longer steers anything, so klinokinesis has been silently
+disconnected from behaviour since then.
+
+### Model-class probes, all rejected
+
+**Slowing the homeostatic clamp** (correct on a 200ms or 1s average
+instead of 20ms, same gains) — the direct test of the Phase 3.15 diagnosis
+that the clamp erases every sustained change: 17 and 114 apples against
+252, every death a wall. Smell only stays at 0.
+
+**Spike-frequency adaptation** on every neuron, meant to compress the
+saturated input populations: 3 apples at the smallest increment (0.1), 0
+at 0.3 and 1.0, with or without the clamp halved. It flattens the
+steering difference in the relay stage along with everything else.
+
+**A stronger odour input** (smell only, ODOUR_SCALE x10, x100, x1000): 0
+apples at every strength, and the mean life is exactly 10 ticks — the
+distance from the start position to the wall straight ahead. The fly
+never turns once.
+
+All reverted.
+
+### The finding underneath
+
+That last number ties the unsolved failures together. This fly turns only
+when an injected signal differs between its left and right halves. It has
+no spontaneous turning, no casting, no search. A wall dead ahead, an odour
+gradient too shallow to differ between two antennae, and an apple it
+cannot see all present the same thing — a symmetric input — and all
+produce the same behaviour: straight on. Real flies turn spontaneously;
+the LAL's bistable steering units generate saccades with no stimulus at
+all, and odour-guided search is built on that (turn often while the smell
+falls, rarely while it rises). The circuit is in this subset since Phase
+3.13, but a population pinned at a fixed rate on a 20ms average cannot be
+bistable.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
