@@ -1602,6 +1602,63 @@ falls, rarely while it rises). The circuit is in this subset since Phase
 3.13, but a population pinned at a fixed rate on a 20ms average cannot be
 bistable.
 
+## Phase 3.17 — why smell cannot steer, and whether this brain can turn on its own
+
+### Smell: the gradient is there, the route to steering is not
+
+The two antennae carry a strong lateral gradient: with the apple 2, 5 and
+12 cells to one side the near antenna reads 90%, 46% and 20% more than the
+far one. `inject_odour` discards nearly all of it — it drives the PNs only
+while the *mean* concentration is rising, scaled by that small rise, so the
+side-to-side difference only ever arrives multiplied by a few thousandths.
+
+Feeding each antenna to its own side's PNs instead (its concentration, or
+the normalised side-to-side contrast, at drive scales up to 10x apart, and
+in one case one side only) produced a steering readout indistinguishable
+from zero in every condition. The connectome explains it:
+
+| route | weight into the premotor network | side-preserving |
+| --- | --- | --- |
+| vision: LC10 | 379,215 | 97% |
+| smell: lateral horn | 21,222 | 70% |
+| smell: MBON | 27,423 | 58% |
+
+(PN -> LH itself is 96% side-preserving; it is the next hop that loses it.)
+The net lateralised odour route is about 40x weaker than vision's. That is a
+property of the fly, not of this model: the lateral horn reports what an
+odour is and how strong, not where it is. Real flies mostly localise odour
+over time — hold course while it strengthens, turn while it weakens — which
+needs a fly that turns without a lateral cue.
+
+### Can the network turn without input?
+
+No sensory input, 30 s per run, three noise seeds; a "turn" counted only
+above |0.005| (an apple ~10 degrees off, ~90 deg/s at the game's gain).
+
+- **Clamp intact:** above threshold 0.0-0.3% of the time, 0-1 side changes.
+- **Clamp removed from the premotor and descending populations:** nothing
+  changes. Unclamped, the LAL sits at 1.0-1.3x the target rate. The clamp
+  was not suppressing it; nothing drives it. The hypothesis that the clamp
+  was hiding bistable LAL dynamics is refuted.
+- **More background noise** does produce spontaneous, balanced alternation
+  through the connectome: at NOISE_STD 0.3, 6-13 side changes per 30 s
+  with a median dwell of 1.4-2.3 s; at 0.5, 26-30 with 0.65-0.87 s. With
+  the premotor clamp also removed it runs away (LAL 55x target, dwell
+  140 ms).
+
+In play it does not help. Smell only stays at 0 apples with a mean life of
+10-11 ticks — the excursions peak around 0.011, about 29 degrees per tick,
+and reverse before the heading accumulates the 45 degrees needed to change
+grid direction. With all senses, noise 0.3 gives 171 apples and 0.5 gives
+126, against 252.
+
+Nothing changed in the code. Tested and rejected, with the whole-brain
+alternative measured rather than estimated: the full MaleCNS graph
+(164,740 connected neurons, 25.6M edges) fits in 2.4 GiB of the laptop
+GPU, but its synaptic matmul alone runs at 0.20x real time in the COO
+format lif.py uses and 0.61x in CSR. CSR is also 3x faster than COO on
+this operation, which the current subset would benefit from too.
+
 ## Open risks / unresolved questions
 
 - Descending neurons only receive 17.0% of their real input from within
